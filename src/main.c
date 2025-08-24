@@ -16,6 +16,8 @@
 #include "main.h"
 #include "../external/nuklear/nuklear.h"
 #include "nuklear_glfw_vulkan.h"
+
+#define CAMERA_SPEED 5
 // Update image data (replaces update())
 // // Update image data (replaces update())
 
@@ -125,7 +127,7 @@ void createModelAndBuffers(Application* app)
 	// loadGltfModel("/home/lka/myprojects/vulkantest3/sponza/Sponza.gltf", &app->mesh);
 	//
 	//
-	loadGltfModel("data/scene.gltf", &app->mesh);
+	loadGltfModel("data/shibahu/scene.gltf", &app->mesh);
 
 	// === Vertex buffer ===
 	VkDeviceSize vertexSize = app->mesh.vertex_count * sizeof(Vertex);
@@ -354,7 +356,7 @@ void initWindow(Application* app)
 	glfwSetCursorPosCallback(app->window, mouse_callback);
 
 	// Initialize camera - positioned to see the ground plane
-	glm_vec3_copy((vec3){0.0f, 111.0f, 10.0f}, app->cameraPos); // Higher up and back
+	glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, app->cameraPos); // Higher up and back
 	glm_vec3_copy((vec3){0.0f, 0.0f, -1.0f}, app->cameraFront);
 	glm_vec3_copy((vec3){0.0f, 1.0f, 0.0f}, app->cameraUp);
 	app->yaw = -90.0f;
@@ -965,8 +967,27 @@ void drawFrame(Application* app)
 	}
 	nk_end(app->nkCtx);
 
+	// Camera Position Widget
+	if (nk_begin(app->nkCtx, "Camera Position", nk_rect(10, 80, 220, 100),
+	        NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE))
+	{
+		char pos_text[128];
+		snprintf(pos_text, sizeof(pos_text), "X: %.2f", app->cameraPos[0]);
+		nk_layout_row_dynamic(app->nkCtx, 20, 1);
+		nk_label(app->nkCtx, pos_text, NK_TEXT_LEFT);
+
+		snprintf(pos_text, sizeof(pos_text), "Y: %.2f", app->cameraPos[1]);
+		nk_layout_row_dynamic(app->nkCtx, 20, 1);
+		nk_label(app->nkCtx, pos_text, NK_TEXT_LEFT);
+
+		snprintf(pos_text, sizeof(pos_text), "Z: %.2f", app->cameraPos[2]);
+		nk_layout_row_dynamic(app->nkCtx, 20, 1);
+		nk_label(app->nkCtx, pos_text, NK_TEXT_LEFT);
+	}
+	nk_end(app->nkCtx);
+
 	// Light Controls
-	if (nk_begin(app->nkCtx, "Light Controls", nk_rect(10, 80, 220, 250),
+	if (nk_begin(app->nkCtx, "Light Controls", nk_rect(10, 190, 220, 250),
 	        NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE))
 	{
 		nk_layout_row_dynamic(app->nkCtx, 25, 1);
@@ -1262,7 +1283,7 @@ void processInput(Application* app)
 	}
 	escape_key_state = current_escape_key_state;
 
-	float cameraSpeed = 20.5f * app->deltaTime;
+	float cameraSpeed = CAMERA_SPEED * app->deltaTime;
 	if (glfwGetKey(app->window, GLFW_KEY_W) == GLFW_PRESS)
 	{
 		vec3 front;

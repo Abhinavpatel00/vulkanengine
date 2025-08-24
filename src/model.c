@@ -1,4 +1,6 @@
 #include "main.h"
+
+#include "main.h"
 void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 parentTransform, Application* app, uint32_t* vertexOffset, uint32_t* indexOffset, uint32_t* primitiveIndex)
 {
 	mat4 localTransform;
@@ -303,3 +305,4 @@ void loadGltfModel(const char* path, Mesh* outMesh)
 	free(dir_path);
 	cgltf_free(data);
 }
+
