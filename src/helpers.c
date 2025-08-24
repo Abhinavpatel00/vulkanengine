@@ -1,4 +1,120 @@
 #include "main.h"
+
+
+void copyBufferToDeviceLocal(VkDevice device, VkCommandPool commandPool, VkQueue queue,
+    VkBuffer src, VkBuffer dst, VkDeviceSize size)
+{
+	VkCommandBufferAllocateInfo allocInfo = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = commandPool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = 1,
+	};
+
+	VkCommandBuffer cmd;
+	VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &cmd));
+
+	VkCommandBufferBeginInfo beginInfo = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+	VkBufferCopy copyRegion = {.size = size};
+	vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
+
+	VK_CHECK(vkEndCommandBuffer(cmd));
+
+	VkSubmitInfo submitInfo = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &cmd,
+	};
+
+	VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+	VK_CHECK(vkQueueWaitIdle(queue));
+
+	vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+}
+
+Buffer createStagingBuffer(Application* app, const void* data, VkDeviceSize size)
+{
+	Buffer staging;
+	createBuffer(app, &staging, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+	memcpy(staging.data, data, size);
+	return staging;
+}
+
+VkCommandBuffer beginSingleTimeCommands(Application* app)
+{
+	VkCommandBufferAllocateInfo allocInfo = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = app->commandPool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = 1,
+	};
+	VkCommandBuffer commandBuffer;
+	VK_CHECK(vkAllocateCommandBuffers(app->device, &allocInfo, &commandBuffer));
+
+	VkCommandBufferBeginInfo beginInfo = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+	return commandBuffer;
+}
+
+void endSingleTimeCommands(Application* app, VkCommandBuffer commandBuffer)
+{
+	VK_CHECK(vkEndCommandBuffer(commandBuffer));
+
+	VkSubmitInfo submitInfo = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &commandBuffer,
+	};
+	VK_CHECK(vkQueueSubmit(app->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+	VK_CHECK(vkQueueWaitIdle(app->graphicsQueue));
+
+	vkFreeCommandBuffers(app->device, app->commandPool, 1, &commandBuffer);
+}
+
+void createBuffer(Application* app, Buffer* buffer, VkDeviceSize size, VkBufferUsageFlags usage)
+{
+	buffer->size = size;
+
+	// 1. Create buffer
+	VkBufferCreateInfo bufferInfo = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+	    .size = size,
+	    .usage = usage,
+	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+	};
+	VK_CHECK(vkCreateBuffer(app->device, &bufferInfo, NULL, &buffer->vkbuffer));
+
+	// 2. Get memory requirements
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(app->device, buffer->vkbuffer, &memRequirements);
+
+	// 3. Find memory type and allocate
+	VkMemoryPropertyFlags desiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	uint32_t memoryTypeIndex = findMemoryType(&app->memoryProperties, memRequirements.memoryTypeBits, desiredFlags);
+	VkMemoryAllocateInfo allocInfo = {
+	    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+	    .pNext = NULL,
+	    .allocationSize = bufferInfo.size,
+	};
+	allocInfo.memoryTypeIndex = memoryTypeIndex;
+
+	VK_CHECK(vkAllocateMemory(app->device, &allocInfo, NULL, &buffer->memory));
+	VK_CHECK(vkBindBufferMemory(app->device, buffer->vkbuffer, buffer->memory, 0));
+
+	// Now check property flags before mapping
+	if (desiredFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+	{
+		VK_CHECK(vkMapMemory(app->device, buffer->memory, 0, size, 0, &buffer->data));
+	}
+}
 void transitionImageLayout(
     VkCommandBuffer cmd,
     VkImage image,

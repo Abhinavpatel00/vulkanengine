@@ -171,3 +171,168 @@ stbi_set_flip_vertically_on_load(false);
 	};
 	VK_CHECK(vkCreateSampler(app->device, &samplerInfo, NULL, &app->skyboxTexture.sampler));
 }
+
+
+void createSkyboxPipeline(Application* app)
+{
+	VkDescriptorSetLayoutBinding bindings[] = {
+	    {
+	        .binding = 0,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+	    },
+	    {
+	        .binding = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+	    },
+	};
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+	    .bindingCount = ARRAYSIZE(bindings),
+	    .pBindings = bindings,
+	};
+	VK_CHECK(vkCreateDescriptorSetLayout(app->device, &layoutInfo, NULL, &app->skyboxDescriptorSetLayout));
+
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+	    .setLayoutCount = 1,
+	    .pSetLayouts = &app->skyboxDescriptorSetLayout,
+	};
+	VK_CHECK(vkCreatePipelineLayout(app->device, &pipelineLayoutInfo, NULL, &app->skyboxPipelineLayout));
+
+	VkShaderModule vertShader = LoadShaderModule("compiledshaders/skybox.vert.spv", app->device);
+	VkShaderModule fragShader = LoadShaderModule("compiledshaders/skybox.frag.spv", app->device);
+
+	VkPipelineShaderStageCreateInfo shaderStages[] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+	        .module = vertShader,
+	        .pName = "main",
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+	        .module = fragShader,
+	        .pName = "main",
+	    },
+	};
+
+	VkVertexInputBindingDescription bindingDescription = {
+	    .binding = 0,
+	    .stride = sizeof(float) * 3,
+	    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+	};
+
+	VkVertexInputAttributeDescription attributeDescription = {
+	    .binding = 0,
+	    .location = 0,
+	    .format = VK_FORMAT_R32G32B32_SFLOAT,
+	    .offset = 0,
+	};
+
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+	    .vertexBindingDescriptionCount = 1,
+	    .pVertexBindingDescriptions = &bindingDescription,
+	    .vertexAttributeDescriptionCount = 1,
+	    .pVertexAttributeDescriptions = &attributeDescription,
+	};
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+	    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+	    .primitiveRestartEnable = VK_FALSE,
+	};
+
+	VkPipelineViewportStateCreateInfo viewportState = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+	    .viewportCount = 1,
+	    .scissorCount = 1,
+	};
+
+	VkPipelineRasterizationStateCreateInfo rasterizer = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+	    .depthClampEnable = VK_FALSE,
+	    .rasterizerDiscardEnable = VK_FALSE,
+	    .polygonMode = VK_POLYGON_MODE_FILL,
+	    .lineWidth = 1.0f,
+	    // Cull front faces to render the cube from the inside without overlap
+	    .cullMode = VK_CULL_MODE_FRONT_BIT,
+	    // Our projection flips Y, which flips winding; use CLOCKWISE to keep expected facing
+	    .frontFace = VK_FRONT_FACE_CLOCKWISE,
+	    .depthBiasEnable = VK_FALSE,
+	};
+
+	VkPipelineMultisampleStateCreateInfo multisampling = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+	    .sampleShadingEnable = VK_FALSE,
+	    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+	};
+
+	VkPipelineDepthStencilStateCreateInfo depthStencil = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	    .depthTestEnable = VK_TRUE,
+	    .depthWriteEnable = VK_FALSE,
+	    .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+	    .depthBoundsTestEnable = VK_FALSE,
+	    .stencilTestEnable = VK_FALSE,
+	};
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachment = {
+	    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+	    .blendEnable = VK_FALSE,
+	};
+
+	VkPipelineColorBlendStateCreateInfo colorBlending = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+	    .logicOpEnable = VK_FALSE,
+	    .attachmentCount = 1,
+	    .pAttachments = &colorBlendAttachment,
+	};
+
+	VkDynamicState dynamicStates[] = {
+	    VK_DYNAMIC_STATE_VIEWPORT,
+	    VK_DYNAMIC_STATE_SCISSOR,
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicState = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+	    .dynamicStateCount = ARRAYSIZE(dynamicStates),
+	    .pDynamicStates = dynamicStates,
+	};
+
+	VkGraphicsPipelineCreateInfo pipelineInfo = {
+	    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+	    .stageCount = 2,
+	    .pStages = shaderStages,
+	    .pVertexInputState = &vertexInputInfo,
+	    .pInputAssemblyState = &inputAssembly,
+	    .pViewportState = &viewportState,
+	    .pRasterizationState = &rasterizer,
+	    .pMultisampleState = &multisampling,
+	    .pDepthStencilState = &depthStencil,
+	    .pColorBlendState = &colorBlending,
+	    .pDynamicState = &dynamicState,
+	    .layout = app->skyboxPipelineLayout,
+	    .renderPass = NULL,
+	    .subpass = 0,
+	};
+
+	VkPipelineRenderingCreateInfo renderingCreateInfo = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+	    .colorAttachmentCount = 1,
+	    .pColorAttachmentFormats = &app->swapchainFormat,
+	    .depthAttachmentFormat = app->depthFormat,
+	};
+	pipelineInfo.pNext = &renderingCreateInfo;
+
+	VK_CHECK(vkCreateGraphicsPipelines(app->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &app->skyboxPipeline));
+
+	vkDestroyShaderModule(app->device, vertShader, NULL);
+	vkDestroyShaderModule(app->device, fragShader, NULL);
+}

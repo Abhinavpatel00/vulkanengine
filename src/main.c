@@ -1,4 +1,3 @@
-
 #define STB_DS_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define CGLTF_IMPLEMENTATION
@@ -14,84 +13,13 @@
 #define NK_INCLUDE_DEFAULT_FONT
 #define NK_IMPLEMENTATION
 #define NK_GLFW_VULKAN_IMPLEMENTATION
-#include "../external/nuklear/nuklear.h"
 #include "main.h"
+#include "../external/nuklear/nuklear.h"
 #include "nuklear_glfw_vulkan.h"
 // Update image data (replaces update())
 // // Update image data (replaces update())
 
 // --- Command Buffer Helpers ---
-
-VkCommandBuffer beginSingleTimeCommands(Application* app)
-{
-	VkCommandBufferAllocateInfo allocInfo = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = app->commandPool,
-	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-	    .commandBufferCount = 1,
-	};
-	VkCommandBuffer commandBuffer;
-	VK_CHECK(vkAllocateCommandBuffers(app->device, &allocInfo, &commandBuffer));
-
-	VkCommandBufferBeginInfo beginInfo = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-	};
-	VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
-	return commandBuffer;
-}
-
-void endSingleTimeCommands(Application* app, VkCommandBuffer commandBuffer)
-{
-	VK_CHECK(vkEndCommandBuffer(commandBuffer));
-
-	VkSubmitInfo submitInfo = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &commandBuffer,
-	};
-	VK_CHECK(vkQueueSubmit(app->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-	VK_CHECK(vkQueueWaitIdle(app->graphicsQueue));
-
-	vkFreeCommandBuffers(app->device, app->commandPool, 1, &commandBuffer);
-}
-
-void createBuffer(Application* app, Buffer* buffer, VkDeviceSize size, VkBufferUsageFlags usage)
-{
-	buffer->size = size;
-
-	// 1. Create buffer
-	VkBufferCreateInfo bufferInfo = {
-	    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-	    .size = size,
-	    .usage = usage,
-	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-	};
-	VK_CHECK(vkCreateBuffer(app->device, &bufferInfo, NULL, &buffer->vkbuffer));
-
-	// 2. Get memory requirements
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(app->device, buffer->vkbuffer, &memRequirements);
-
-	// 3. Find memory type and allocate
-	VkMemoryPropertyFlags desiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-	uint32_t memoryTypeIndex = findMemoryType(&app->memoryProperties, memRequirements.memoryTypeBits, desiredFlags);
-	VkMemoryAllocateInfo allocInfo = {
-	    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-	    .pNext = NULL,
-	    .allocationSize = bufferInfo.size,
-	};
-	allocInfo.memoryTypeIndex = memoryTypeIndex;
-
-	VK_CHECK(vkAllocateMemory(app->device, &allocInfo, NULL, &buffer->memory));
-	VK_CHECK(vkBindBufferMemory(app->device, buffer->vkbuffer, buffer->memory, 0));
-
-	// Now check property flags before mapping
-	if (desiredFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-	{
-		VK_CHECK(vkMapMemory(app->device, buffer->memory, 0, size, 0, &buffer->data));
-	}
-}
 
 // decriptors are defined to use by shader  , desciptorSet are used to group resources, layout is used  to define the resources
 //  Push are limited to a certain number of bindings, but are synchronized with the frame. Set can be huge, but are not synchronized with the frame (command buffer).
@@ -163,7 +91,8 @@ void createSwapchainRelatedResources(Application* app)
 
 	// Track swapchain image layouts
 	app->swapchainImageLayouts = malloc(app->swapchainImageCount * sizeof(VkImageLayout));
-	for (u32 i = 0; i < app->swapchainImageCount; ++i) {
+	for (u32 i = 0; i < app->swapchainImageCount; ++i)
+	{
 		app->swapchainImageLayouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
@@ -171,67 +100,23 @@ void createSwapchainRelatedResources(Application* app)
 	createDepthResources(app);
 
 	app->imageReleaseSemaphore = malloc(app->swapchainImageCount * sizeof(VkSemaphore));
-	app->sceneDoneSemaphores   = malloc(app->swapchainImageCount * sizeof(VkSemaphore));
-	app->presentReadySemaphores= malloc(app->swapchainImageCount * sizeof(VkSemaphore));
+	app->sceneDoneSemaphores = malloc(app->swapchainImageCount * sizeof(VkSemaphore));
+	app->presentReadySemaphores = malloc(app->swapchainImageCount * sizeof(VkSemaphore));
 	// Allocate per-image present command buffers
 	app->presentCmdBuffers = malloc(app->swapchainImageCount * sizeof(VkCommandBuffer));
 	VkCommandBufferAllocateInfo presentAllocInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		.commandPool = app->commandPool,
-		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = app->swapchainImageCount,
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = app->commandPool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = app->swapchainImageCount,
 	};
 	VK_CHECK(vkAllocateCommandBuffers(app->device, &presentAllocInfo, app->presentCmdBuffers));
 	for (u32 i = 0; i < app->swapchainImageCount; i++)
 	{
 		app->imageReleaseSemaphore[i] = createSemaphore(app->device);
-		app->sceneDoneSemaphores[i]   = createSemaphore(app->device);
-		app->presentReadySemaphores[i]= createSemaphore(app->device);
+		app->sceneDoneSemaphores[i] = createSemaphore(app->device);
+		app->presentReadySemaphores[i] = createSemaphore(app->device);
 	}
-}
-
-void copyBufferToDeviceLocal(VkDevice device, VkCommandPool commandPool, VkQueue queue,
-    VkBuffer src, VkBuffer dst, VkDeviceSize size)
-{
-	VkCommandBufferAllocateInfo allocInfo = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = commandPool,
-	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-	    .commandBufferCount = 1,
-	};
-
-	VkCommandBuffer cmd;
-	VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &cmd));
-
-	VkCommandBufferBeginInfo beginInfo = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-	};
-	VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-
-	VkBufferCopy copyRegion = {.size = size};
-	vkCmdCopyBuffer(cmd, src, dst, 1, &copyRegion);
-
-	VK_CHECK(vkEndCommandBuffer(cmd));
-
-	VkSubmitInfo submitInfo = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &cmd,
-	};
-
-	VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-	VK_CHECK(vkQueueWaitIdle(queue));
-
-	vkFreeCommandBuffers(device, commandPool, 1, &cmd);
-}
-
-Buffer createStagingBuffer(Application* app, const void* data, VkDeviceSize size)
-{
-	Buffer staging;
-	createBuffer(app, &staging, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-	memcpy(staging.data, data, size);
-	return staging;
 }
 
 void createModelAndBuffers(Application* app)
@@ -372,8 +257,6 @@ void createUniformBuffers(Application* app)
 	createBuffer(app, &app->skyboxUniformBuffer, sizeof(UniformBufferObject), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 }
 
-// --- Vulkan Initialization Helpers ---
-
 void createCommandPoolAndBuffer(Application* app, u32 queueFamilyIndex)
 {
 	// Create command pool
@@ -404,169 +287,6 @@ void createCommandPoolAndBuffer(Application* app, u32 queueFamilyIndex)
 	VK_CHECK(vkAllocateCommandBuffers(app->device, &computeAllocInfo, &app->computeCmdBuffer));
 }
 
-void createSkyboxPipeline(Application* app)
-{
-	VkDescriptorSetLayoutBinding bindings[] = {
-	    {
-	        .binding = 0,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-	        .descriptorCount = 1,
-	        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-	    },
-	    {
-	        .binding = 1,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	        .descriptorCount = 1,
-	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-	    },
-	};
-
-	VkDescriptorSetLayoutCreateInfo layoutInfo = {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-	    .bindingCount = ARRAYSIZE(bindings),
-	    .pBindings = bindings,
-	};
-	VK_CHECK(vkCreateDescriptorSetLayout(app->device, &layoutInfo, NULL, &app->skyboxDescriptorSetLayout));
-
-	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-	    .setLayoutCount = 1,
-	    .pSetLayouts = &app->skyboxDescriptorSetLayout,
-	};
-	VK_CHECK(vkCreatePipelineLayout(app->device, &pipelineLayoutInfo, NULL, &app->skyboxPipelineLayout));
-
-	VkShaderModule vertShader = LoadShaderModule("compiledshaders/skybox.vert.spv", app->device);
-	VkShaderModule fragShader = LoadShaderModule("compiledshaders/skybox.frag.spv", app->device);
-
-	VkPipelineShaderStageCreateInfo shaderStages[] = {
-	    {
-	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-	        .stage = VK_SHADER_STAGE_VERTEX_BIT,
-	        .module = vertShader,
-	        .pName = "main",
-	    },
-	    {
-	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-	        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-	        .module = fragShader,
-	        .pName = "main",
-	    },
-	};
-
-	VkVertexInputBindingDescription bindingDescription = {
-	    .binding = 0,
-	    .stride = sizeof(float) * 3,
-	    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-	};
-
-	VkVertexInputAttributeDescription attributeDescription = {
-	    .binding = 0,
-	    .location = 0,
-	    .format = VK_FORMAT_R32G32B32_SFLOAT,
-	    .offset = 0,
-	};
-
-	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-	    .vertexBindingDescriptionCount = 1,
-	    .pVertexBindingDescriptions = &bindingDescription,
-	    .vertexAttributeDescriptionCount = 1,
-	    .pVertexAttributeDescriptions = &attributeDescription,
-	};
-
-	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-	    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-	    .primitiveRestartEnable = VK_FALSE,
-	};
-
-	VkPipelineViewportStateCreateInfo viewportState = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-	    .viewportCount = 1,
-	    .scissorCount = 1,
-	};
-
-	VkPipelineRasterizationStateCreateInfo rasterizer = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-	    .depthClampEnable = VK_FALSE,
-	    .rasterizerDiscardEnable = VK_FALSE,
-	    .polygonMode = VK_POLYGON_MODE_FILL,
-	    .lineWidth = 1.0f,
-	    // Cull front faces to render the cube from the inside without overlap
-	    .cullMode = VK_CULL_MODE_FRONT_BIT,
-	    // Our projection flips Y, which flips winding; use CLOCKWISE to keep expected facing
-	    .frontFace = VK_FRONT_FACE_CLOCKWISE,
-	    .depthBiasEnable = VK_FALSE,
-	};
-
-	VkPipelineMultisampleStateCreateInfo multisampling = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-	    .sampleShadingEnable = VK_FALSE,
-	    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-	};
-
-	VkPipelineDepthStencilStateCreateInfo depthStencil = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-	    .depthTestEnable = VK_TRUE,
-	    .depthWriteEnable = VK_FALSE,
-	    .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-	    .depthBoundsTestEnable = VK_FALSE,
-	    .stencilTestEnable = VK_FALSE,
-	};
-
-	VkPipelineColorBlendAttachmentState colorBlendAttachment = {
-	    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-	    .blendEnable = VK_FALSE,
-	};
-
-	VkPipelineColorBlendStateCreateInfo colorBlending = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-	    .logicOpEnable = VK_FALSE,
-	    .attachmentCount = 1,
-	    .pAttachments = &colorBlendAttachment,
-	};
-
-	VkDynamicState dynamicStates[] = {
-	    VK_DYNAMIC_STATE_VIEWPORT,
-	    VK_DYNAMIC_STATE_SCISSOR,
-	};
-
-	VkPipelineDynamicStateCreateInfo dynamicState = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-	    .dynamicStateCount = ARRAYSIZE(dynamicStates),
-	    .pDynamicStates = dynamicStates,
-	};
-
-	VkGraphicsPipelineCreateInfo pipelineInfo = {
-	    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-	    .stageCount = 2,
-	    .pStages = shaderStages,
-	    .pVertexInputState = &vertexInputInfo,
-	    .pInputAssemblyState = &inputAssembly,
-	    .pViewportState = &viewportState,
-	    .pRasterizationState = &rasterizer,
-	    .pMultisampleState = &multisampling,
-	    .pDepthStencilState = &depthStencil,
-	    .pColorBlendState = &colorBlending,
-	    .pDynamicState = &dynamicState,
-	    .layout = app->skyboxPipelineLayout,
-	    .renderPass = NULL,
-	    .subpass = 0,
-	};
-
-	VkPipelineRenderingCreateInfo renderingCreateInfo = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-	    .colorAttachmentCount = 1,
-	    .pColorAttachmentFormats = &app->swapchainFormat,
-	    .depthAttachmentFormat = app->depthFormat,
-	};
-	pipelineInfo.pNext = &renderingCreateInfo;
-
-	VK_CHECK(vkCreateGraphicsPipelines(app->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &app->skyboxPipeline));
-
-	vkDestroyShaderModule(app->device, vertShader, NULL);
-	vkDestroyShaderModule(app->device, fragShader, NULL);
-}
 void createPipeline(Application* app)
 {
 	// Create descriptor set layout
@@ -609,6 +329,19 @@ void framebufferResizeCallback(GLFWwindow* window, int width, int height)
 	app->framebufferResized = true;
 }
 
+void toggle_ui_mode(Application* app)
+{
+	app->is_ui_mode = !app->is_ui_mode;
+	if (app->is_ui_mode)
+	{
+		glfwSetInputMode(app->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+	}
+	else
+	{
+		glfwSetInputMode(app->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	}
+}
+
 void initWindow(Application* app)
 {
 	glfwInit();
@@ -619,7 +352,6 @@ void initWindow(Application* app)
 	glfwSetWindowUserPointer(app->window, app);
 	glfwSetFramebufferSizeCallback(app->window, framebufferResizeCallback);
 	glfwSetCursorPosCallback(app->window, mouse_callback);
-	glfwSetInputMode(app->window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	// Initialize camera - positioned to see the ground plane
 	glm_vec3_copy((vec3){0.0f, 111.0f, 10.0f}, app->cameraPos); // Higher up and back
@@ -630,6 +362,8 @@ void initWindow(Application* app)
 	app->lastX = app->width / 2.0f;
 	app->lastY = app->height / 2.0f;
 	app->firstMouse = true;
+	app->is_ui_mode = true; // Start in UI mode initially
+	toggle_ui_mode(app);    // Set initial cursor state
 	app->deltaTime = 0.0f;
 	app->lastFrame = 0.0f;
 
@@ -742,12 +476,12 @@ void initVulkan(Application* app)
 		nk_glfw3_font_stash_end(app->graphicsQueue);
 		/*nk_style_load_all_cursors(ctx, atlas->cursors);*/
 	/*nk_style_set_font(ctx, &droid->handle);*/}
-	
+
 	// Initialize FPS tracking
 	app->fpsLastTime = glfwGetTime();
 	app->fpsFrameCount = 0;
 	app->fps = 0.0f;
-	
+
 	createPipeline(app);
 	createSkyboxPipeline(app);
 	createSkyboxTexture(app);
@@ -1016,18 +750,17 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 	// Transition image layout for color attachment from its current layout
 	VkImageLayout currentLayout = app->swapchainImageLayouts ? app->swapchainImageLayouts[imageIndex] : VK_IMAGE_LAYOUT_UNDEFINED;
 	transitionImageLayout(commandBuffer, app->swapchainImages[imageIndex],
-						  currentLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						  0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-						  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						  VK_IMAGE_ASPECT_COLOR_BIT);
-    
-    // Transition depth image layout
-    transitionImageLayout(commandBuffer, app->depthImage, 
-                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, 
-                         0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT_KHR, 
-                         VK_IMAGE_ASPECT_DEPTH_BIT);
+	    currentLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	    0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+	    VK_IMAGE_ASPECT_COLOR_BIT);
 
+	// Transition depth image layout
+	transitionImageLayout(commandBuffer, app->depthImage,
+	    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+	    0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT_KHR,
+	    VK_IMAGE_ASPECT_DEPTH_BIT);
 
 	VkRenderingAttachmentInfo colorAttachment = {
 	    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -1049,7 +782,7 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 
 	VkRenderingInfo renderingInfo = {
 	    .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-		.renderArea = {{0, 0}, {app->width, app->height}},
+	    .renderArea = {{0, 0}, {app->width, app->height}},
 	    .layerCount = 1,
 	    .colorAttachmentCount = 1,
 	    .pColorAttachments = &colorAttachment,
@@ -1188,7 +921,8 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 	    1, &presentBarrier);
 
 	// Track new layout as PRESENT for this image
-	if (app->swapchainImageLayouts) {
+	if (app->swapchainImageLayouts)
+	{
 		app->swapchainImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	}
 
@@ -1217,13 +951,12 @@ void drawFrame(Application* app)
 	VK_CHECK(vkResetCommandBuffer(commandBuffer, 0));
 	recordCommandBuffer(app, commandBuffer, imageIndex);
 
-
 	// Build Nuklear UI
 	nk_glfw3_new_frame();
 
 	// FPS Widget
 	if (nk_begin(app->nkCtx, "Performance", nk_rect(10, 10, 180, 60),
-		NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_TITLE))
+	        NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_TITLE))
 	{
 		char fps_text[64];
 		snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", app->fps);
@@ -1232,60 +965,86 @@ void drawFrame(Application* app)
 	}
 	nk_end(app->nkCtx);
 
+	// Light Controls
+	if (nk_begin(app->nkCtx, "Light Controls", nk_rect(10, 80, 220, 250),
+	        NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE))
+	{
+		nk_layout_row_dynamic(app->nkCtx, 25, 1);
+		nk_label(app->nkCtx, "Directional Light", NK_TEXT_LEFT);
+
+		nk_layout_row_dynamic(app->nkCtx, 25, 1);
+		nk_property_float(app->nkCtx, "Dir X", -1.0f, &app->dirLight.direction[0], 1.0f, 0.1f, 0.01f);
+		nk_property_float(app->nkCtx, "Dir Y", -1.0f, &app->dirLight.direction[1], 1.0f, 0.1f, 0.01f);
+		nk_property_float(app->nkCtx, "Dir Z", -1.0f, &app->dirLight.direction[2], 1.0f, 0.1f, 0.01f);
+
+		nk_layout_row_dynamic(app->nkCtx, 120, 1);
+		struct nk_colorf color = {app->dirLight.color[0], app->dirLight.color[1], app->dirLight.color[2], 1.0f};
+		color = nk_color_picker(app->nkCtx, color, NK_RGBA);
+		app->dirLight.color[0] = color.r;
+		app->dirLight.color[1] = color.g;
+		app->dirLight.color[2] = color.b;
+
+		nk_layout_row_dynamic(app->nkCtx, 25, 1);
+		nk_property_float(app->nkCtx, "Intensity", 0.0f, &app->dirLight.intensity, 20.0f, 0.5f, 0.1f);
+	}
+	nk_end(app->nkCtx);
+
 	// Submit the main command buffer first; signal per-image sceneDone semaphore
 	VkSubmitInfo submitInfo = {
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &app->ImageAquireSemaphore[app->currentFrame],
-		.pWaitDstStageMask = (VkPipelineStageFlags[]){VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
-		.commandBufferCount = 1,
-		.pCommandBuffers = &commandBuffer,
-		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &app->sceneDoneSemaphores[imageIndex],
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .waitSemaphoreCount = 1,
+	    .pWaitSemaphores = &app->ImageAquireSemaphore[app->currentFrame],
+	    .pWaitDstStageMask = (VkPipelineStageFlags[]){VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &commandBuffer,
+	    .signalSemaphoreCount = 1,
+	    .pSignalSemaphores = &app->sceneDoneSemaphores[imageIndex],
 	};
 	VK_CHECK(vkQueueSubmit(app->graphicsQueue, 1, &submitInfo, app->inFlightFences[app->currentFrame]));
 
 	// Render Nuklear UI waiting on sceneDone; returns NK's own completion semaphore
 	VkSemaphore nk_done_semaphore = nk_glfw3_render(
-		app->graphicsQueue, imageIndex, app->sceneDoneSemaphores[imageIndex], NK_ANTI_ALIASING_ON);
+	    app->graphicsQueue, imageIndex, app->sceneDoneSemaphores[imageIndex], NK_ANTI_ALIASING_ON);
 
 	// Optional: record a tiny cmd buffer to ensure final layout is PRESENT (no-op if already tracked)
 	VkCommandBuffer presentCmd = app->presentCmdBuffers[imageIndex];
 	VK_CHECK(vkResetCommandBuffer(presentCmd, 0));
-	VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	VkCommandBufferBeginInfo beginInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
 	VK_CHECK(vkBeginCommandBuffer(presentCmd, &beginInfo));
-	if (!app->swapchainImageLayouts || app->swapchainImageLayouts[imageIndex] != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+	if (!app->swapchainImageLayouts || app->swapchainImageLayouts[imageIndex] != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+	{
 		transitionImageLayout(presentCmd, app->swapchainImages[imageIndex],
-							  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-							  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
-							  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-							  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-							  VK_IMAGE_ASPECT_COLOR_BIT);
-		if (app->swapchainImageLayouts) app->swapchainImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
+		    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+		    VK_IMAGE_ASPECT_COLOR_BIT);
+		if (app->swapchainImageLayouts)
+			app->swapchainImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	}
 	VK_CHECK(vkEndCommandBuffer(presentCmd));
 
 	VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	VkSubmitInfo presentSubmit = {
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &nk_done_semaphore,
-		.pWaitDstStageMask = &waitStage,
-		.commandBufferCount = 1,
-		.pCommandBuffers = &presentCmd,
-		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &app->presentReadySemaphores[imageIndex],
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .waitSemaphoreCount = 1,
+	    .pWaitSemaphores = &nk_done_semaphore,
+	    .pWaitDstStageMask = &waitStage,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &presentCmd,
+	    .signalSemaphoreCount = 1,
+	    .pSignalSemaphores = &app->presentReadySemaphores[imageIndex],
 	};
 	VK_CHECK(vkQueueSubmit(app->graphicsQueue, 1, &presentSubmit, VK_NULL_HANDLE));
 
 	VkPresentInfoKHR presentInfo = {
-		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &app->presentReadySemaphores[imageIndex],
-		.swapchainCount = 1,
-		.pSwapchains = &app->swapchain,
-		.pImageIndices = &imageIndex,
+	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+	    .waitSemaphoreCount = 1,
+	    .pWaitSemaphores = &app->presentReadySemaphores[imageIndex],
+	    .swapchainCount = 1,
+	    .pSwapchains = &app->swapchain,
+	    .pImageIndices = &imageIndex,
 	};
 	result = vkQueuePresentKHR(app->graphicsQueue, &presentInfo);
 
@@ -1308,10 +1067,11 @@ void mainLoop(Application* app)
 		float currentFrame = glfwGetTime();
 		app->deltaTime = currentFrame - app->lastFrame;
 		app->lastFrame = currentFrame;
-		
+
 		// Calculate FPS
 		app->fpsFrameCount++;
-		if (currentFrame - app->fpsLastTime >= 1.0) {
+		if (currentFrame - app->fpsLastTime >= 1.0)
+		{
 			app->fps = app->fpsFrameCount / (currentFrame - app->fpsLastTime);
 			app->fpsFrameCount = 0;
 			app->fpsLastTime = currentFrame;
@@ -1426,12 +1186,12 @@ void recreateSwapchain(Application* app)
 	{
 		u32 graphicsqueueFamilyIndex = find_graphics_queue_family_index(app->physicalDevice);
 		nk_glfw3_device_create(
-			app->device, app->physicalDevice,
-			graphicsqueueFamilyIndex,
-			app->swapchainImageViews, app->swapchainImageCount,
-			app->swapchainFormat,
-			512 * 1024, 128 * 1024,
-			(uint32_t)app->width, (uint32_t)app->height);
+		    app->device, app->physicalDevice,
+		    graphicsqueueFamilyIndex,
+		    app->swapchainImageViews, app->swapchainImageCount,
+		    app->swapchainFormat,
+		    512 * 1024, 128 * 1024,
+		    (uint32_t)app->width, (uint32_t)app->height);
 
 		// Re-upload font atlas for Nuklear
 		struct nk_font_atlas* atlas = NULL;
@@ -1494,6 +1254,14 @@ int main(void)
 // --- Input Handling ---
 void processInput(Application* app)
 {
+	static int escape_key_state = GLFW_RELEASE;
+	int current_escape_key_state = glfwGetKey(app->window, GLFW_KEY_ESCAPE);
+	if (current_escape_key_state == GLFW_RELEASE && escape_key_state == GLFW_PRESS)
+	{
+		toggle_ui_mode(app);
+	}
+	escape_key_state = current_escape_key_state;
+
 	float cameraSpeed = 20.5f * app->deltaTime;
 	if (glfwGetKey(app->window, GLFW_KEY_W) == GLFW_PRESS)
 	{
@@ -1540,6 +1308,12 @@ void processInput(Application* app)
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
 	Application* app = glfwGetWindowUserPointer(window);
+
+	if (app->is_ui_mode)
+	{
+		app->firstMouse = true;
+		return;
+	}
 
 	if (app->firstMouse)
 	{
@@ -1597,6 +1371,6 @@ void updateLights(Application* app)
 	app->lights[3].position[2] = sinf(time * 0.5f) * radius * 0.7f;
 
 	// Animate directional light
-	app->dirLight.direction[0] = sinf(time * 2.0f);
-	app->dirLight.direction[2] = cosf(time * 2.0f);
+	//	app->dirLight.direction[0] = sinf(time * 2.0f);
+	//	app->dirLight.direction[2] = cosf(time * 2.0f);
 }

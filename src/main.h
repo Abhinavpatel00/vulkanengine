@@ -56,15 +56,15 @@
 #endif
 
 // --- Core Structures ---
-
-inline char* strdup(const char* s) {
-    size_t len = strlen(s) + 1;
-    char* copy = (char*)malloc(len);
-    if (copy) {
-        memcpy(copy, s, len);
-    }
-    return copy;
-}
+//
+// static inline char* strdup(const char* s) {
+//     size_t len = strlen(s) + 1;
+//     char* copy = (char*)malloc(len);
+//     if (copy) {
+//         memcpy(copy, s, len);
+//     }
+//     return copy;
+// }
 typedef struct
 {
 	vec3 pos;
@@ -311,6 +311,7 @@ typedef struct Application
 
 	// Nuklear UI context
 	struct nk_context* nkCtx;
+	bool is_ui_mode;
 } Application;
 
 void createSkyboxTexture(Application* app);
@@ -417,5 +418,8 @@ void cleanup(Application* app);
 void createStorageImage(Application* app, StorageImage* img, uint32_t width, uint32_t height);
 void createComputePipeline(Application* app, ComputePipeline* compute, const char* shaderPath, VkDescriptorSetLayoutBinding* bindings, uint32_t bindingCount);
 void createComputeDescriptors(Application* app, ComputePipeline* compute, VkDescriptorSet* descriptorSet, VkDescriptorPoolSize* poolSizes, uint32_t poolSizeCount, VkWriteDescriptorSet* descriptorWrites, uint32_t descriptorWriteCount);
+
+
+void createSkyboxPipeline(Application* app);
 
 int main(void);

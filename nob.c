@@ -34,8 +34,7 @@ int main(int argc, char **argv)
     nob_cc_flags(&cmd);
 
     // extra compile/link flags (similar to build.sh)
-    cmd_append(&cmd, "-Wpointer-arith", "-Wformat=2", "-Wall", "-Wextra", "-Wshadow",
-                     "-ggdb", "-std=c99", "-pedantic", "-D_DEBUG", "-DVK_USE_PLATFORM_WAYLAND_KHR");
+    cmd_append(&cmd, "-D_DEBUG", "-DVK_USE_PLATFORM_WAYLAND_KHR");
     cmd_append(&cmd, "-lvulkan", "-lm", "-lglfw", "-lpthread", "-ldl");
 
     nob_cc_output(&cmd, BUILD_FOLDER "tri");

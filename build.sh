@@ -2,11 +2,13 @@
 set -e  # Exit immediately on error
 
 echo "Cleaning old build..."
-rm -f ./build/tri
+rm -rf ./build
+
 mkdir -p build compiledshaders
 
 # Compilation flags
-CFLAGS="-Wpointer-arith -Wformat=2 -Wall -Wextra -Wshadow -ggdb -std=c99 -pedantic -D_DEBUG -DVK_USE_PLATFORM_WAYLAND_KHR"
+# CFLAGS="-Wpointer-arith -Wformat=2 -Wall -Wextra -Wshadow -ggdb -std=c99 -pedantic"
+CFLAGS="-D_DEBUG -DVK_USE_PLATFORM_WAYLAND_KHR"
 LDFLAGS="-lvulkan -lm -lglfw -lpthread -ldl"
 
 # Shader list
