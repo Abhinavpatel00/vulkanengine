@@ -30,49 +30,65 @@ void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 par
 			vec4 baseColor = {1.0f, 1.0f, 1.0f, 1.0f}; // default white
 			if (materialIndex >= 0 && materialIndex < (int)outMesh->material_count)
 			{
-				memcpy(baseColor, outMesh->materials[materialIndex].base_color, sizeof(vec4));
+				memcpy(baseColor, outMesh->materials[materialIndex].baseColorFactor, sizeof(vec4));
 			}
 
-			// Find POSITION accessor
+			// Locate attribute accessors robustly
+			cgltf_accessor *normalAccessor = NULL, *uvAccessor = NULL;
 			for (cgltf_size a = 0; a < primitive->attributes_count; ++a)
 			{
-				if (strcmp(primitive->attributes[a].name, "POSITION") == 0)
-				{
-					posAccessor = primitive->attributes[a].data;
-					break;
-				}
+				const cgltf_attribute* attr = &primitive->attributes[a];
+				if (attr->type == cgltf_attribute_type_position)
+					posAccessor = attr->data;
+				else if (attr->type == cgltf_attribute_type_normal)
+					normalAccessor = attr->data;
+				else if (attr->type == cgltf_attribute_type_texcoord && attr->index == 0)
+					uvAccessor = attr->data;
 			}
 
 			if (!posAccessor)
 				continue;
 
-			// Extract vertices
+			// Precompute normal matrix from worldTransform
+			mat3 normalMatrix;
+			glm_mat4_pick3(worldTransform, normalMatrix);
+			glm_mat3_inv(normalMatrix, normalMatrix);
+			glm_mat3_transpose(normalMatrix);
+
+			// Extract vertices using cgltf API (handles strides/offsets)
 			for (cgltf_size v = 0; v < posAccessor->count; ++v)
 			{
-				Vertex vert = {0};
+				Vertex vert = (Vertex){0};
 
-				for (cgltf_size a = 0; a < primitive->attributes_count; ++a)
+				// Position
+				float p[3] = {0};
+				cgltf_accessor_read_float(posAccessor, v, p, 3);
+				vec4 pos = {p[0], p[1], p[2], 1.0f};
+				vec4 transformed;
+				glm_mat4_mulv(worldTransform, pos, transformed);
+				glm_vec3_copy(transformed, vert.pos);
+
+				// Normal
+				if (normalAccessor)
 				{
-					cgltf_attribute* attr = &primitive->attributes[a];
-					float* buffer = (float*)attr->data->buffer_view->buffer->data +
-					                attr->data->buffer_view->offset / sizeof(float) +
-					                attr->data->offset / sizeof(float);
+					float n[3] = {0};
+					cgltf_accessor_read_float(normalAccessor, v, n, 3);
+					vec3 nn = {n[0], n[1], n[2]};
+					glm_mat3_mulv(normalMatrix, nn, vert.normal);
+					glm_vec3_normalize(vert.normal);
+				}
+				else
+				{
+					glm_vec3_copy((vec3){0, 1, 0}, vert.normal);
+				}
 
-					if (strcmp(attr->name, "POSITION") == 0)
-					{
-						vec4 pos = {buffer[v * 3], buffer[v * 3 + 1], buffer[v * 3 + 2], 1.0f};
-						vec4 transformed;
-						glm_mat4_mulv(worldTransform, pos, transformed);
-						glm_vec3_copy(transformed, vert.pos);
-					}
-					else if (strcmp(attr->name, "NORMAL") == 0)
-					{
-						memcpy(&vert.normal, buffer + v * 3, sizeof(vec3));
-					}
-					else if (strcmp(attr->name, "TEXCOORD_0") == 0)
-					{
-						memcpy(&vert.texcoord, buffer + v * 2, sizeof(vec2));
-					}
+				// Texcoord 0 (flip V)
+				if (uvAccessor)
+				{
+					float uv[2] = {0};
+					cgltf_accessor_read_float(uvAccessor, v, uv, 2);
+					vert.texcoord[0] = uv[0];
+					vert.texcoord[1] = 1.0f - uv[1];
 				}
 
 				// Set vertex color from material
@@ -169,7 +185,9 @@ void loadGltfModel(const char* path, Mesh* outMesh)
 	cgltf_options options = {0};
 	cgltf_data* data = NULL;
 
-	cgltf_parse_file(&options, path, &data);
+	    cgltf_parse_file(&options, path, &data);
+    printf("GLTF materials_count: %zu\n", data->materials_count);
+
 
 	char* dir_path = NULL;
 	char* last_slash = strrchr(path, '/');
@@ -203,48 +221,80 @@ void loadGltfModel(const char* path, Mesh* outMesh)
 			Material* ourMat = &outMesh->materials[i];
 
 			// Initialize with default values
-			ourMat->base_color[0] = 1.0f;
-			ourMat->base_color[1] = 1.0f;
-			ourMat->base_color[2] = 1.0f;
-			ourMat->base_color[3] = 1.0f;
-			ourMat->has_texture = 0;
-			ourMat->texture_index = -1;
-			ourMat->texture_path = NULL;
-			ourMat->alpha_cutoff = 0.5f; // Default alpha cutoff
-			ourMat->alpha_mode = 0;      // Default to opaque
+			ourMat->baseColorFactor[0] = 1.0f;
+			ourMat->baseColorFactor[1] = 1.0f;
+			ourMat->baseColorFactor[2] = 1.0f;
+			ourMat->baseColorFactor[3] = 1.0f;
+			ourMat->metallicFactor = 1.0f;
+			ourMat->roughnessFactor = 1.0f;
+			ourMat->emissiveFactor[0] = 0.0f;
+			ourMat->emissiveFactor[1] = 0.0f;
+			ourMat->emissiveFactor[2] = 0.0f;
+			ourMat->hasBaseColorTexture = 0;
+			ourMat->hasMetallicRoughnessTexture = 0;
+			ourMat->hasEmissiveTexture = 0;
+			ourMat->baseColorTexturePath = NULL;
+			ourMat->metallicRoughnessTexturePath = NULL;
+			ourMat->emissiveTexturePath = NULL;
+			ourMat->alphaCutoff = 0.5f; // Default alpha cutoff
+			ourMat->alphaMode = 0;      // Default to opaque
 
 			// Parse alpha mode and cutoff
 			if (mat->alpha_mode == cgltf_alpha_mode_opaque)
 			{
-				ourMat->alpha_mode = 0;
+				ourMat->alphaMode = 0;
 			}
 			else if (mat->alpha_mode == cgltf_alpha_mode_mask)
 			{
-				ourMat->alpha_mode = 1;
-				ourMat->alpha_cutoff = mat->alpha_cutoff;
+				ourMat->alphaMode = 1;
+				ourMat->alphaCutoff = mat->alpha_cutoff;
 			}
 			else if (mat->alpha_mode == cgltf_alpha_mode_blend)
 			{
-				ourMat->alpha_mode = 2;
+				ourMat->alphaMode = 2;
 			}
 
+			// Parse PBR metallic-roughness properties
 			if (mat->has_pbr_metallic_roughness)
 			{
 				cgltf_pbr_metallic_roughness* pbr = &mat->pbr_metallic_roughness;
-				memcpy(ourMat->base_color, pbr->base_color_factor, sizeof(float) * 4);
 
-				if (pbr->base_color_texture.texture &&
-				    pbr->base_color_texture.texture->image &&
-				    pbr->base_color_texture.texture->image->uri)
+				memcpy(ourMat->baseColorFactor, pbr->base_color_factor, sizeof(float) * 4);
+				ourMat->metallicFactor = pbr->metallic_factor;
+				ourMat->roughnessFactor = pbr->roughness_factor;
+
+				if (pbr->base_color_texture.texture && pbr->base_color_texture.texture->image && pbr->base_color_texture.texture->image->uri)
 				{
-
+					ourMat->hasBaseColorTexture = 1;
 					const char* uri = pbr->base_color_texture.texture->image->uri;
 					size_t full_path_len = strlen(dir_path) + strlen(uri) + 1;
-					ourMat->texture_path = malloc(full_path_len);
-					snprintf(ourMat->texture_path, full_path_len, "%s%s", dir_path, uri);
-					ourMat->has_texture = 1;
+					ourMat->baseColorTexturePath = malloc(full_path_len);
+					snprintf(ourMat->baseColorTexturePath, full_path_len, "%s%s", dir_path, uri);
+				}
+
+					// Double-sided
+					ourMat->doubleSided = mat->double_sided ? true : false;
+
+				if (pbr->metallic_roughness_texture.texture && pbr->metallic_roughness_texture.texture->image && pbr->metallic_roughness_texture.texture->image->uri)
+				{
+					ourMat->hasMetallicRoughnessTexture = 1;
+					const char* uri = pbr->metallic_roughness_texture.texture->image->uri;
+					size_t full_path_len = strlen(dir_path) + strlen(uri) + 1;
+					ourMat->metallicRoughnessTexturePath = malloc(full_path_len);
+					snprintf(ourMat->metallicRoughnessTexturePath, full_path_len, "%s%s", dir_path, uri);
 				}
 			}
+
+			if (mat->emissive_texture.texture && mat->emissive_texture.texture->image && mat->emissive_texture.texture->image->uri)
+			{
+				ourMat->hasEmissiveTexture = 1;
+				const char* uri = mat->emissive_texture.texture->image->uri;
+				size_t full_path_len = strlen(dir_path) + strlen(uri) + 1;
+				ourMat->emissiveTexturePath = malloc(full_path_len);
+				snprintf(ourMat->emissiveTexturePath, full_path_len, "%s%s", dir_path, uri);
+			}
+
+			memcpy(ourMat->emissiveFactor, mat->emissive_factor, sizeof(float) * 3);
 		}
 	}
 
@@ -287,12 +337,12 @@ void loadGltfModel(const char* path, Mesh* outMesh)
 	// Legacy support - use first material for backward compatibility
 	if (outMesh->material_count > 0)
 	{
-		memcpy(outMesh->base_color, outMesh->materials[0].base_color, sizeof(vec4));
-		outMesh->has_texture = outMesh->materials[0].has_texture;
-		if (outMesh->materials[0].texture_path)
+		memcpy(outMesh->base_color, outMesh->materials[0].baseColorFactor, sizeof(vec4));
+		outMesh->has_texture = outMesh->materials[0].hasBaseColorTexture;
+		if (outMesh->materials[0].baseColorTexturePath)
 		{
-			outMesh->texture_path = malloc(strlen(outMesh->materials[0].texture_path) + 1);
-			strcpy(outMesh->texture_path, outMesh->materials[0].texture_path);
+			outMesh->texture_path = malloc(strlen(outMesh->materials[0].baseColorTexturePath) + 1);
+			strcpy(outMesh->texture_path, outMesh->materials[0].baseColorTexturePath);
 		}
 	}
 	else

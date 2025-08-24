@@ -23,18 +23,12 @@ VkDescriptorSetLayout createDescriptorSetLayout(VkDevice device)
 	    },
 	    {
 	        .binding = 3,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 	    },
 	    {
 	        .binding = 4,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-	        .descriptorCount = 1,
-	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-	    },
-	    {
-	        .binding = 5,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -49,6 +43,7 @@ VkDescriptorSetLayout createDescriptorSetLayout(VkDevice device)
 
 	VkDescriptorSetLayout descriptorSetLayout;
 	VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &descriptorSetLayout));
+	printf("createDescriptorSetLayout returning: %p\n", (void*)descriptorSetLayout);
 	return descriptorSetLayout;
 }
 
@@ -73,13 +68,13 @@ VkDescriptorPool createDescriptorPool(VkDevice device)
 	return descriptorPool;
 }
 
-VkDescriptorSet allocateDescriptorSet(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout)
+VkDescriptorSet allocateDescriptorSet(VkDevice device, VkDescriptorPool pool, const VkDescriptorSetLayout* pLayout)
 {
 	VkDescriptorSetAllocateInfo allocInfo = {
 	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 	    .descriptorPool = pool,
 	    .descriptorSetCount = 1,
-	    .pSetLayouts = &layout};
+	    .pSetLayouts = pLayout};
 
 	VkDescriptorSet descriptorSet;
 	VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
@@ -91,89 +86,53 @@ void createDescriptors(Application* app)
 	// Create descriptor pool
 	app->descriptorPool = createDescriptorPool(app->device);
 
-	// Allocate descriptor sets for each texture
-	app->descriptorSets = calloc(app->texture_count, sizeof(VkDescriptorSet));
+	// Allocate descriptor sets for each material
+	app->descriptorSets = calloc(app->mesh.material_count, sizeof(VkDescriptorSet));
 
-	for (u32 i = 0; i < app->texture_count; i++)
+	for (u32 i = 0; i < app->mesh.material_count; i++)
 	{
-		app->descriptorSets[i] = allocateDescriptorSet(app->device, app->descriptorPool, app->descriptorSetLayout);
+		printf("app->descriptorSetLayout in createDescriptors loop: %p\n", (void*)app->descriptorSetLayout);
+		app->descriptorSets[i] = allocateDescriptorSet(app->device, app->descriptorPool, &app->descriptorSetLayout);
 
-		// Update descriptor set for this texture
+		// Update descriptor set for this material
 		VkDescriptorBufferInfo bufferInfo = {
 		    .buffer = app->uniformBuffer.vkbuffer,
 		    .offset = 0,
 		    .range = sizeof(UniformBufferObject)};
 
-		VkDescriptorImageInfo imageInfo = {
+		VkDescriptorImageInfo baseColorImageInfo = {
 		    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		    .imageView = app->textures[i].view,
-		    .sampler = app->textures[i].sampler};
+		    .imageView = app->baseColorTextures[i].view,
+		    .sampler = app->baseColorTextures[i].sampler};
 
-		VkDescriptorBufferInfo baseColorBufferInfo = {
-		    .buffer = app->baseColorBuffer.vkbuffer,
-		    .offset = 0,
-		    .range = sizeof(vec4)};
+		VkDescriptorImageInfo metallicRoughnessImageInfo = {
+		    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .imageView = app->metallicRoughnessTextures[i].view,
+		    .sampler = app->metallicRoughnessTextures[i].sampler};
 
-		VkDescriptorBufferInfo hasTextureBufferInfo = {
-		    .buffer = app->hasTextureBuffer.vkbuffer,
-		    .offset = 0,
-		    .range = sizeof(int)};
+		VkDescriptorImageInfo emissiveImageInfo = {
+		    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .imageView = app->emissiveTextures[i].view,
+		    .sampler = app->emissiveTextures[i].sampler};
 
-		VkDescriptorBufferInfo alphaCutoffBufferInfo = {
-		    .buffer = app->alphaCutoffBuffer.vkbuffer,
+		VkDescriptorBufferInfo materialBufferInfo = {
+			.buffer = app->materialUniformBuffers[i].vkbuffer,
 		    .offset = 0,
-		    .range = sizeof(float)};
+			.range = sizeof(MaterialGPU)};
 
 		VkWriteDescriptorSet descriptorWrites[] = {
 		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 0, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .pBufferInfo = &bufferInfo},
-		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 1, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .pImageInfo = &imageInfo},
-		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 3, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .pBufferInfo = &baseColorBufferInfo},
-		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 4, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .pBufferInfo = &hasTextureBufferInfo},
-		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 5, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .pBufferInfo = &alphaCutoffBufferInfo}};
+		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 1, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .pImageInfo = &baseColorImageInfo},
+		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 2, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .pImageInfo = &metallicRoughnessImageInfo},
+		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 3, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .pImageInfo = &emissiveImageInfo},
+		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 4, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .pBufferInfo = &materialBufferInfo},
+		};
 
-		vkUpdateDescriptorSets(app->device, 5, descriptorWrites, 0, NULL);
+		vkUpdateDescriptorSets(app->device, ARRAYSIZE(descriptorWrites), descriptorWrites, 0, NULL);
 	}
 
 	// Legacy single descriptor set support (use first texture)
 	app->descriptorSet = app->descriptorSets[0];
-
-    // Create skybox descriptor set
-    app->skyboxDescriptorSet = allocateDescriptorSet(app->device, app->descriptorPool, app->skyboxDescriptorSetLayout);
-
-    VkDescriptorBufferInfo skyboxBufferInfo = {
-        .buffer = app->skyboxUniformBuffer.vkbuffer,
-        .offset = 0,
-        .range = sizeof(UniformBufferObject)
-    };
-
-    VkDescriptorImageInfo skyboxImageInfo = {
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .imageView = app->skyboxTexture.view,
-        .sampler = app->skyboxTexture.sampler
-    };
-
-    VkWriteDescriptorSet skyboxDescriptorWrites[] = {
-        {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = app->skyboxDescriptorSet,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .pBufferInfo = &skyboxBufferInfo,
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = app->skyboxDescriptorSet,
-            .dstBinding = 1,
-            .dstArrayElement = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
-            .pImageInfo = &skyboxImageInfo,
-        },
-    };
-
-    vkUpdateDescriptorSets(app->device, 2, skyboxDescriptorWrites, 0, NULL);
 }
 
 void createComputeDescriptorSetLayout(Application* app)
@@ -196,4 +155,45 @@ void createComputeDescriptorSetLayout(Application* app)
 	    .bindingCount = 2,
 	    .pBindings = bindings};
 	VK_CHECK(vkCreateDescriptorSetLayout(app->device, &layoutInfo, NULL, &app->compute.descLayout));
+}
+
+void createSkyboxDescriptors(Application* app)
+{
+	// Requires: app->descriptorPool, app->skyboxDescriptorSetLayout, app->skyboxUniformBuffer, app->skyboxTexture
+	app->skyboxDescriptorSet = allocateDescriptorSet(app->device, app->descriptorPool, &app->skyboxDescriptorSetLayout);
+
+	VkDescriptorBufferInfo skyboxBufferInfo = {
+		.buffer = app->skyboxUniformBuffer.vkbuffer,
+		.offset = 0,
+		.range = sizeof(UniformBufferObject),
+	};
+
+	VkDescriptorImageInfo skyboxImageInfo = {
+		.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		.imageView = app->skyboxTexture.view,
+		.sampler = app->skyboxTexture.sampler,
+	};
+
+	VkWriteDescriptorSet skyboxDescriptorWrites[] = {
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = app->skyboxDescriptorSet,
+			.dstBinding = 0,
+			.dstArrayElement = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.descriptorCount = 1,
+			.pBufferInfo = &skyboxBufferInfo,
+		},
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = app->skyboxDescriptorSet,
+			.dstBinding = 1,
+			.dstArrayElement = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.pImageInfo = &skyboxImageInfo,
+		},
+	};
+
+	vkUpdateDescriptorSets(app->device, ARRAYSIZE(skyboxDescriptorWrites), skyboxDescriptorWrites, 0, NULL);
 }

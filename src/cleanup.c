@@ -26,16 +26,38 @@ void cleanupResources(Application* app)
 	destroyBuffer(app->device, &app->computeUniformBuffer);
 
 	// Clean up multiple textures
-	if (app->textures)
+	if (app->baseColorTextures)
 	{
 		for (u32 i = 0; i < app->texture_count; i++)
 		{
-			vkDestroySampler(app->device, app->textures[i].sampler, NULL);
-			vkDestroyImageView(app->device, app->textures[i].view, NULL);
-			vkDestroyImage(app->device, app->textures[i].image, NULL);
-			vkFreeMemory(app->device, app->textures[i].memory, NULL);
+			vkDestroySampler(app->device, app->baseColorTextures[i].sampler, NULL);
+			vkDestroyImageView(app->device, app->baseColorTextures[i].view, NULL);
+			vkDestroyImage(app->device, app->baseColorTextures[i].image, NULL);
+			vkFreeMemory(app->device, app->baseColorTextures[i].memory, NULL);
 		}
-		free(app->textures);
+		free(app->baseColorTextures);
+	}
+	if (app->metallicRoughnessTextures)
+	{
+		for (u32 i = 0; i < app->texture_count; i++)
+		{
+			vkDestroySampler(app->device, app->metallicRoughnessTextures[i].sampler, NULL);
+			vkDestroyImageView(app->device, app->metallicRoughnessTextures[i].view, NULL);
+			vkDestroyImage(app->device, app->metallicRoughnessTextures[i].image, NULL);
+			vkFreeMemory(app->device, app->metallicRoughnessTextures[i].memory, NULL);
+		}
+		free(app->metallicRoughnessTextures);
+	}
+	if (app->emissiveTextures)
+	{
+		for (u32 i = 0; i < app->texture_count; i++)
+		{
+			vkDestroySampler(app->device, app->emissiveTextures[i].sampler, NULL);
+			vkDestroyImageView(app->device, app->emissiveTextures[i].view, NULL);
+			vkDestroyImage(app->device, app->emissiveTextures[i].image, NULL);
+			vkFreeMemory(app->device, app->emissiveTextures[i].memory, NULL);
+		}
+		free(app->emissiveTextures);
 	}
 
 	vkDestroyDescriptorPool(app->device, app->descriptorPool, NULL);
@@ -49,17 +71,7 @@ void cleanupResources(Application* app)
 	// Clean up mesh data
 	free(app->mesh.vertices);
 	free(app->mesh.indices);
-	free(app->mesh.texture_path);
-
-	// Clean up materials
-	if (app->mesh.materials)
-	{
-		for (u32 i = 0; i < app->mesh.material_count; i++)
-		{
-			free(app->mesh.materials[i].texture_path);
-		}
-		free(app->mesh.materials);
-	}
+	
 
 	// Clean up primitives
 	free(app->mesh.primitives);
@@ -67,7 +79,11 @@ void cleanupResources(Application* app)
 
 void cleanupPipeline(Application* app)
 {
-	vkDestroyPipeline(app->device, app->pipeline, NULL);
+	for (u32 i = 0; i < app->mesh.material_count; ++i)
+	{
+		vkDestroyPipeline(app->device, app->pipelines[i], NULL);
+	}
+	free(app->pipelines);
 	vkDestroyPipelineLayout(app->device, app->pipelineLayout, NULL);
 	vkDestroyShaderModule(app->device, app->fragShaderModule, NULL);
 	vkDestroyShaderModule(app->device, app->vertShaderModule, NULL);

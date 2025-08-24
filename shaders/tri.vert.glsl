@@ -10,12 +10,24 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec4 fragColor; // ✅ MUST MATCH!
 
+struct PointLight {
+    vec4 position;
+    vec4 color;
+};
+
+struct DirectionalLight {
+    vec4 direction;
+    vec4 color;
+};
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     mat4 view;
     mat4 model;
     vec3 cameraPos;
     uint numLights;
+    PointLight lights[4];
+    DirectionalLight dirLight;
 } ubo;
 
 void main() {
@@ -23,7 +35,7 @@ void main() {
     gl_Position = ubo.proj * ubo.view * worldPos;
 
     fragWorldPos = worldPos.xyz;
-    fragNormal = mat3(ubo.model) * inNormal;
+    fragNormal = inNormal;
     fragTexCoord = inTexCoord;
     fragColor = inColor; // ✅ PASS COLOR
 }

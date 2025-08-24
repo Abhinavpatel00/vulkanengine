@@ -102,7 +102,132 @@ void generateMipmaps(Application* app, VkCommandBuffer cmd, VkImage image, VkFor
 	    1, &lastBarrier);
 }
 
-void createTextureImage(Application* app, const char* path, Texture* outTexture, u32* outMipLevels)
+void createDummyTexture(Application* app, Texture* outTexture, u32* outMipLevels)
+{
+	*outMipLevels = 1;
+	stbi_uc pixels[] = {255, 255, 255, 255};
+	VkDeviceSize imageSize = 4;
+
+	Buffer stagingBuffer;
+	createBuffer(app, &stagingBuffer, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+	memcpy(stagingBuffer.data, pixels, (size_t)imageSize);
+
+	VkImageCreateInfo imageInfo = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	    .imageType = VK_IMAGE_TYPE_2D,
+	    .extent.width = 1,
+	    .extent.height = 1,
+	    .extent.depth = 1,
+	    .mipLevels = *outMipLevels,
+	    .arrayLayers = 1,
+	    .format = VK_FORMAT_R8G8B8A8_SRGB,
+	    .tiling = VK_IMAGE_TILING_OPTIMAL,
+	    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	    .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+	    .samples = VK_SAMPLE_COUNT_1_BIT,
+	};
+
+	VK_CHECK(vkCreateImage(app->device, &imageInfo, NULL, &outTexture->image));
+
+	VkMemoryRequirements memRequirements;
+	vkGetImageMemoryRequirements(app->device, outTexture->image, &memRequirements);
+
+	VkMemoryAllocateInfo allocInfo = {
+	    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+	    .allocationSize = memRequirements.size,
+	    .memoryTypeIndex = selectmemorytype(&app->memoryProperties, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+	};
+
+	VK_CHECK(vkAllocateMemory(app->device, &allocInfo, NULL, &outTexture->memory));
+	VK_CHECK(vkBindImageMemory(app->device, outTexture->image, outTexture->memory, 0));
+
+	VkCommandBuffer commandBuffer = beginSingleTimeCommands(app);
+
+	// Transition layout to TRANSFER_DST_OPTIMAL
+	VkImageMemoryBarrier barrier = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .image = outTexture->image,
+	    .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .subresourceRange.baseMipLevel = 0,
+	    .subresourceRange.levelCount = *outMipLevels,
+	    .subresourceRange.baseArrayLayer = 0,
+	    .subresourceRange.layerCount = 1,
+	    .srcAccessMask = 0,
+	    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	};
+
+	vkCmdPipelineBarrier(
+	    commandBuffer,
+	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+	    0,
+	    0, NULL,
+	    0, NULL,
+	    1, &barrier);
+
+	// Copy buffer to image
+	VkBufferImageCopy region = {
+	    .bufferOffset = 0,
+	    .bufferRowLength = 0,
+	    .bufferImageHeight = 0,
+	    .imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .imageSubresource.mipLevel = 0,
+	    .imageSubresource.baseArrayLayer = 0,
+	    .imageSubresource.layerCount = 1,
+	    .imageOffset = {0, 0, 0},
+	    .imageExtent = {1, 1, 1},
+	};
+	vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.vkbuffer, outTexture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+	// Transition layout to shader read
+	VkImageMemoryBarrier shaderBarrier = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .image = outTexture->image,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .subresourceRange.baseMipLevel = 0,
+	    .subresourceRange.levelCount = 1,
+	    .subresourceRange.baseArrayLayer = 0,
+	    .subresourceRange.layerCount = 1,
+	    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	};
+
+	vkCmdPipelineBarrier(
+	    commandBuffer,
+	    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+	    0,
+	    0, NULL,
+	    0, NULL,
+	    1, &shaderBarrier);
+
+	endSingleTimeCommands(app, commandBuffer);
+
+	destroyBuffer(app->device, &stagingBuffer);
+
+	// Create image view
+	VkImageViewCreateInfo viewInfo = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+	    .image = outTexture->image,
+	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
+	    .format = VK_FORMAT_R8G8B8A8_SRGB,
+	    .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .subresourceRange.baseMipLevel = 0,
+	    .subresourceRange.levelCount = *outMipLevels,
+	    .subresourceRange.baseArrayLayer = 0,
+	    .subresourceRange.layerCount = 1,
+	};
+	VK_CHECK(vkCreateImageView(app->device, &viewInfo, NULL, &outTexture->view));
+}
+
+void createTextureImage(Application* app, const char* path, Texture* outTexture, u32* outMipLevels, VkFormat format)
 {
 
 	int texWidth, texHeight, texChannels;
@@ -134,7 +259,7 @@ void createTextureImage(Application* app, const char* path, Texture* outTexture,
 	    .extent.depth = 1,
 	    .mipLevels = *outMipLevels,
 	    .arrayLayers = 1,
-	    .format = VK_FORMAT_R8G8B8A8_SRGB,
+		.format = format,
 	    .tiling = VK_IMAGE_TILING_OPTIMAL,
 	    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	    .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -198,7 +323,7 @@ void createTextureImage(Application* app, const char* path, Texture* outTexture,
 	vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.vkbuffer, outTexture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
 	// Generate mipmaps and transition layout to shader read
-	generateMipmaps(app, commandBuffer, outTexture->image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, *outMipLevels);
+	generateMipmaps(app, commandBuffer, outTexture->image, format, texWidth, texHeight, *outMipLevels);
 
 	endSingleTimeCommands(app, commandBuffer);
 
@@ -209,7 +334,7 @@ void createTextureImage(Application* app, const char* path, Texture* outTexture,
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 	    .image = outTexture->image,
 	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
-	    .format = VK_FORMAT_R8G8B8A8_SRGB,
+		.format = format,
 	    .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 	    .subresourceRange.baseMipLevel = 0,
 	    .subresourceRange.levelCount = *outMipLevels,

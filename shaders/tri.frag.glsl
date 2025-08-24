@@ -1,23 +1,20 @@
 #version 450
 
-#define MAX_POINT_LIGHTS 8
+layout(location = 0) in vec3 fragWorldPos;
+layout(location = 1) in vec3 fragNormal;
+layout(location = 2) in vec2 fragTexCoord;
+layout(location = 3) in vec4 fragColor;
+
+layout(location = 0) out vec4 outColor;
 
 struct PointLight {
-    vec3 position;
-    float _pad1;
-    vec3 color;
-    float intensity;
-    float constant;
-    float linear;
-    float quadratic;
-    float _pad2;
+    vec4 position;
+    vec4 color;
 };
 
 struct DirectionalLight {
-    vec3 direction;
-    float _pad1;
-    vec3 color;
-    float intensity;
+    vec4 direction;
+    vec4 color;
 };
 
 layout(binding = 0) uniform UniformBufferObject {
@@ -26,85 +23,120 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     vec3 cameraPos;
     uint numLights;
-    PointLight lights[MAX_POINT_LIGHTS];
+    PointLight lights[4];
     DirectionalLight dirLight;
 } ubo;
 
-layout(binding = 1) uniform sampler2D texSampler;
-layout(binding = 3) uniform BaseColorUBO_t { vec4 baseColor; } baseColorUbo;
-layout(binding = 4) uniform HasTextureUBO_t { int hasTexture; } hasTextureUbo;
-layout(binding = 5) uniform AlphaCutoffUBO_t { float alphaCutoff; } alphaCutoffUbo;
+layout(binding = 1) uniform sampler2D baseColorSampler;
+layout(binding = 2) uniform sampler2D metallicRoughnessSampler;
+layout(binding = 3) uniform sampler2D emissiveSampler;
 
-layout(location = 0) in vec3 fragWorldPos;
-layout(location = 1) in vec3 fragNormal;
-layout(location = 2) in vec2 fragTexCoord;
-layout(location = 3) in vec4 fragColor; // ✅ RECEIVE FROM VERTEX
+layout(binding = 4) uniform MaterialUBO {
+    vec4 baseColorFactor;   // rgba
+    vec4 emissiveFactor;    // rgb + pad
+    vec4 mr_ac_am;          // x: metallic, y: roughness, z: alphaCutoff, w: alphaMode (as float)
+    ivec4 hasFlags;         // x: hasBaseColor, y: hasMetallicRoughness, z: hasEmissive, w: unused
+} material;
 
-layout(location = 0) out vec4 outColor;
+const float PI = 3.14159265359;
 
-vec3 calculatePointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 albedo) {
-    vec3 lightDir = normalize(light.position - fragPos);
-    float diff = max(dot(normal, lightDir), 0.0);
-    vec3 halfwayDir = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(normal, halfwayDir), 0.0), 64.0);
-    float distance = length(light.position - fragPos);
-    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * distance * distance);
-
-    vec3 ambient = 0.1 * light.color * light.intensity;
-    vec3 diffuse = diff * light.color * light.intensity;
-    vec3 specular = spec * light.color * light.intensity * 0.5;
-
-    ambient *= attenuation;
-    diffuse *= attenuation;
-    specular *= attenuation;
-
-    return (ambient + diffuse) * albedo + specular;
+float distributionGGX(vec3 N, vec3 H, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH * NdotH;
+    float nom = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+    return nom / denom;
 }
 
-vec3 calculateDirLight(DirectionalLight light, vec3 normal, vec3 viewDir, vec3 albedo) {
-    vec3 lightDir = normalize(-light.direction);
-    float diff = max(dot(normal, lightDir), 0.0);
-    vec3 halfwayDir = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(normal, halfwayDir), 0.0), 32.0);
+float geometrySchlickGGX(float NdotV, float roughness) {
+    float r = (roughness + 1.0);
+    float k = (r * r) / 8.0;
+    float nom = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+    return nom / denom;
+}
 
-    vec3 ambient = 0.1 * light.color * light.intensity;
-    vec3 diffuse = diff * light.color * light.intensity;
-    vec3 specular = spec * light.color * light.intensity * 0.5;
+float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = geometrySchlickGGX(NdotV, roughness);
+    float ggx1 = geometrySchlickGGX(NdotL, roughness);
+    return ggx1 * ggx2;
+}
 
-    return (ambient + diffuse) * albedo + specular;
+vec3 fresnelSchlick(float cosTheta, vec3 F0) {
+    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 void main() {
-    vec4 texColor = vec4(1.0);
     vec3 albedo;
+    float metallic;
+    float roughness;
     float alpha = 1.0;
-    
-    if (hasTextureUbo.hasTexture == 1) {
-        texColor = texture(texSampler, fragTexCoord);
-        albedo = texColor.rgb * fragColor.rgb; // ✅ Use vertex color
-        alpha = texColor.a * fragColor.a;
+
+    if (material.hasFlags.x == 1) {
+        vec4 bc = texture(baseColorSampler, fragTexCoord);
+        albedo = bc.rgb * material.baseColorFactor.rgb;
+        alpha = bc.a * material.baseColorFactor.a;
     } else {
-        albedo = fragColor.rgb; // ✅ Use vertex color
-        alpha = fragColor.a;
-    }
-    
-    // Alpha cutoff test
-    if (alphaCutoffUbo.alphaCutoff > 0.0 && alpha < alphaCutoffUbo.alphaCutoff) {
-        discard;
+        albedo = material.baseColorFactor.rgb;
+        alpha = material.baseColorFactor.a;
     }
 
-    vec3 normal = normalize(fragNormal);
-    vec3 viewDir = normalize(ubo.cameraPos - fragWorldPos);
-
-    vec3 result = vec3(0.0);
-    for (int i = 0; i < int(ubo.numLights); ++i) {
-        if (i >= MAX_POINT_LIGHTS) break;
-        result += calculatePointLight(ubo.lights[i], normal, fragWorldPos, viewDir, albedo);
+    if (material.hasFlags.y == 1) {
+        vec4 metallicRoughness = texture(metallicRoughnessSampler, fragTexCoord);
+        metallic = metallicRoughness.b * material.mr_ac_am.x;
+        roughness = metallicRoughness.g * material.mr_ac_am.y;
+    } else {
+        metallic = material.mr_ac_am.x;
+        roughness = material.mr_ac_am.y;
     }
 
-    result += calculateDirLight(ubo.dirLight, normal, viewDir, albedo);
+    int alphaMode = int(material.mr_ac_am.w);
+    float alphaCutoff = material.mr_ac_am.z;
+    if (alphaMode == 1 && alpha < alphaCutoff) discard; // mask
 
-    result += 0.15 * albedo;
+    vec3 N = normalize(fragNormal);
+    vec3 V = normalize(ubo.cameraPos - fragWorldPos);
 
-    outColor = vec4(result, alpha);
+    vec3 F0 = vec3(0.04);
+    F0 = mix(F0, albedo, metallic);
+
+    vec3 Lo = vec3(0.0);
+
+    // Directional light
+    vec3 L = normalize(-ubo.dirLight.direction.xyz);
+    vec3 H = normalize(V + L);
+    float distance = 1.0; // Directional light is infinitely far
+    float attenuation = 1.0;
+    vec3 radiance = ubo.dirLight.color.rgb;
+
+    float NDF = distributionGGX(N, H, roughness);
+    float G = geometrySmith(N, V, L, roughness);
+    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+
+    vec3 kS = F;
+    vec3 kD = vec3(1.0) - kS;
+    kD *= 1.0 - metallic;
+
+    float NdotL = max(dot(N, L), 0.0);
+    vec3 numerator = NDF * G * F;
+    float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
+    vec3 spec = numerator / denominator;
+
+    Lo += (kD * albedo / PI + spec) * radiance * NdotL;
+
+    vec3 ambient = vec3(0.03) * albedo;
+    vec3 color = ambient + Lo;
+
+    if (material.hasFlags.z == 1) {
+        color += texture(emissiveSampler, fragTexCoord).rgb * material.emissiveFactor.rgb;
+    } else {
+        color += material.emissiveFactor.rgb;
+    }
+
+    outColor = vec4(color, alpha);
 }

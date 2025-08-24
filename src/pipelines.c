@@ -2,7 +2,7 @@
 #include "main.h"
 
 
-VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader)
+VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader, Material* material)
 {
 	VkPipelineShaderStageCreateInfo stages[2] = {
 	    {
@@ -59,7 +59,7 @@ VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkSha
 	    .depthClampEnable = VK_FALSE,
 	    .rasterizerDiscardEnable = VK_FALSE,
 	    .polygonMode = VK_POLYGON_MODE_FILL,
-	    .cullMode = VK_CULL_MODE_BACK_BIT,
+	    .cullMode = material->doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT,
 	    .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 	    .depthBiasEnable = VK_FALSE,
 	    .depthBiasConstantFactor = 0.0f,
@@ -84,6 +84,13 @@ VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkSha
 
 	VkPipelineColorBlendAttachmentState colorBlendAttachment = {
 	    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        .blendEnable = material->alphaMode == 2 ? VK_TRUE : VK_FALSE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
 	};
 
 	VkPipelineColorBlendStateCreateInfo colorBlendState = {

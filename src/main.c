@@ -201,53 +201,62 @@ void createModelAndBuffers(Application* app)
 
 void createTextureResources(Application* app)
 {
-	// Count unique textures from materials
-	app->texture_count = 0;
-	for (u32 i = 0; i < app->mesh.material_count; i++)
-	{
-		if (app->mesh.materials[i].has_texture)
-		{
-			app->texture_count++;
-		}
-	}
+    app->texture_count = app->mesh.material_count;
+    app->baseColorTextures = calloc(app->texture_count, sizeof(Texture));
+    app->metallicRoughnessTextures = calloc(app->texture_count, sizeof(Texture));
+    app->emissiveTextures = calloc(app->texture_count, sizeof(Texture));
+	app->materialUniformBuffers = calloc(app->texture_count, sizeof(Buffer));
 
-	// Always have at least one texture (fallback)
-	if (app->texture_count == 0)
-	{
-		app->texture_count = 1;
-	}
+    for (u32 i = 0; i < app->texture_count; ++i)
+    {
+        u32 mipLevels;
+		if (app->mesh.materials[i].hasBaseColorTexture)
+        {
+			createTextureImage(app, app->mesh.materials[i].baseColorTexturePath, &app->baseColorTextures[i], &mipLevels, VK_FORMAT_R8G8B8A8_SRGB);
+        }
+        else
+        {
+            createDummyTexture(app, &app->baseColorTextures[i], &mipLevels);
+        }
+        createTextureSampler(app, &app->baseColorTextures[i], mipLevels);
 
-	// Allocate texture array
-	app->textures = calloc(app->texture_count, sizeof(Texture));
+		if (app->mesh.materials[i].hasMetallicRoughnessTexture)
+        {
+			createTextureImage(app, app->mesh.materials[i].metallicRoughnessTexturePath, &app->metallicRoughnessTextures[i], &mipLevels, VK_FORMAT_R8G8B8A8_UNORM);
+        }
+        else
+        {
+            createDummyTexture(app, &app->metallicRoughnessTextures[i], &mipLevels);
+        }
+        createTextureSampler(app, &app->metallicRoughnessTextures[i], mipLevels);
 
-	// Load textures and assign indices to materials
-	u32 textureIndex = 0;
-	for (u32 i = 0; i < app->mesh.material_count; i++)
-	{
-		if (app->mesh.materials[i].has_texture && app->mesh.materials[i].texture_path)
-		{
-			u32 mipLevels;
-			createTextureImage(app, app->mesh.materials[i].texture_path, &app->textures[textureIndex], &mipLevels);
-			createTextureSampler(app, &app->textures[textureIndex], mipLevels);
-			app->mesh.materials[i].texture_index = textureIndex;
-			textureIndex++;
-		}
-	}
+		if (app->mesh.materials[i].hasEmissiveTexture)
+        {
+			createTextureImage(app, app->mesh.materials[i].emissiveTexturePath, &app->emissiveTextures[i], &mipLevels, VK_FORMAT_R8G8B8A8_SRGB);
+        }
+        else
+        {
+            createDummyTexture(app, &app->emissiveTextures[i], &mipLevels);
+        }
+        createTextureSampler(app, &app->emissiveTextures[i], mipLevels);
 
-	// Fallback texture if no materials have textures
-	if (textureIndex == 0)
-	{
-		u32 mipLevels;
-		createTextureImage(app, app->mesh.texture_path ? app->mesh.texture_path : "Bark_DeadTree.png", &app->textures[0], &mipLevels);
-		createTextureSampler(app, &app->textures[0], mipLevels);
-	}
+	// Create and upload per-material UBO
+	MaterialGPU m = {0};
+	memcpy(m.baseColorFactor, app->mesh.materials[i].baseColorFactor, sizeof(vec4));
+	m.emissiveFactor[0] = app->mesh.materials[i].emissiveFactor[0];
+	m.emissiveFactor[1] = app->mesh.materials[i].emissiveFactor[1];
+	m.emissiveFactor[2] = app->mesh.materials[i].emissiveFactor[2];
+	m.mr_ac_am[0] = app->mesh.materials[i].metallicFactor;
+	m.mr_ac_am[1] = app->mesh.materials[i].roughnessFactor;
+	m.mr_ac_am[2] = app->mesh.materials[i].alphaCutoff;
+	m.mr_ac_am[3] = (float)app->mesh.materials[i].alphaMode;
+	m.hasFlags[0] = app->mesh.materials[i].hasBaseColorTexture;
+	m.hasFlags[1] = app->mesh.materials[i].hasMetallicRoughnessTexture;
+	m.hasFlags[2] = app->mesh.materials[i].hasEmissiveTexture;
 
-	// Legacy single texture support
-	if (app->texture_count > 0)
-	{
-		app->texture = app->textures[0];
-		app->mipLevels = 1; // Default mip levels for legacy support
-	}
+	createBuffer(app, &app->materialUniformBuffers[i], sizeof(MaterialGPU), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+	memcpy(app->materialUniformBuffers[i].data, &m, sizeof(MaterialGPU));
+    }
 }
 
 void createUniformBuffers(Application* app)
@@ -292,7 +301,6 @@ void createCommandPoolAndBuffer(Application* app, u32 queueFamilyIndex)
 void createPipeline(Application* app)
 {
 	// Create descriptor set layout
-	app->descriptorSetLayout = createDescriptorSetLayout(app->device);
 
 	// Create pipeline layout
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
@@ -302,16 +310,27 @@ void createPipeline(Application* app)
 	};
 	VK_CHECK(vkCreatePipelineLayout(app->device, &pipelineLayoutInfo, NULL, &app->pipelineLayout));
 
-	// Load shaders and create main pipeline
+	// Load shaders
 	app->vertShaderModule = LoadShaderModule("compiledshaders/tri.vert.spv", app->device);
 	app->fragShaderModule = LoadShaderModule("compiledshaders/tri.frag.spv", app->device);
-	app->pipeline = createMeshPipeline(app, app->vertShaderModule, app->fragShaderModule);
+
+	// Create pipelines for each material
+	    
+    app->pipelines = calloc(app->mesh.material_count, sizeof(VkPipeline));
+
+	for (u32 i = 0; i < app->mesh.material_count; ++i)
+	{
+		app->pipelines[i] = createMeshPipeline(app, app->vertShaderModule, app->fragShaderModule, &app->mesh.materials[i]);
+		printf("Pipeline for material %u: %p\n", i, (void*)app->pipelines[i]);
+	}
 }
 
 void createResources(Application* app)
 {
 	createModelAndBuffers(app);
 	createTextureResources(app);
+	app->descriptorSetLayout = createDescriptorSetLayout(app->device);
+	printf("app->descriptorSetLayout in createResources: %p\n", (void*)app->descriptorSetLayout);
 
 	createUniformBuffers(app);
 	updateBaseColorAndHasTexture(app);
@@ -413,7 +432,7 @@ void initWindow(Application* app)
 	// Direction remains the same
 	glm_vec3_copy((vec3){-0.2f, -1.0f, -0.3f}, app->dirLight.direction);
 	glm_vec3_copy((vec3){1.0f, 1.0f, 0.0f}, app->dirLight.color);
-	app->dirLight.intensity = 10.0f;
+	
 }
 
 void initVulkan(Application* app)
@@ -484,10 +503,11 @@ void initVulkan(Application* app)
 	app->fpsFrameCount = 0;
 	app->fps = 0.0f;
 
+	createResources(app);
 	createPipeline(app);
 	createSkyboxPipeline(app);
 	createSkyboxTexture(app);
-	createResources(app);
+	createSkyboxDescriptors(app);
 	createSyncObjects(app);
 
 	// Create particle buffer
@@ -584,7 +604,7 @@ void initVulkan(Application* app)
 	VK_CHECK(vkCreatePipelineLayout(app->device, &particlePipelineLayoutInfo, NULL, &app->particlePipelineLayout));
 
 	// Create particle graphics descriptor set
-	app->particleGraphicsDescriptorSet = allocateDescriptorSet(app->device, app->descriptorPool, app->particleGraphicsDescriptorSetLayout);
+	app->particleGraphicsDescriptorSet = allocateDescriptorSet(app->device, app->descriptorPool, &app->particleGraphicsDescriptorSetLayout);
 
 	VkDescriptorBufferInfo particleGraphicsBufferInfo = {
 	    .buffer = app->particleBuffer.vkbuffer,
@@ -836,7 +856,7 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->skyboxPipelineLayout, 0, 1, &app->skyboxDescriptorSet, 0, NULL);
 	vkCmdDraw(commandBuffer, 36, 1, 0, 0);
 
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipeline);
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelines[0]);
 
 	VkViewport viewport = {.x = 0.0f, .y = 0.0f, .width = (float)app->width, .height = (float)app->height, .minDepth = 0.0f, .maxDepth = 1.0f};
 	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
@@ -855,35 +875,11 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 		Primitive* prim = &app->mesh.primitives[i];
 		if (prim->material_index >= 0 && prim->material_index < (int)app->mesh.material_count)
 		{
-			Material* mat = &app->mesh.materials[prim->material_index];
-			memcpy(app->baseColorBuffer.data, mat->base_color, sizeof(vec4));
-			memcpy(app->hasTextureBuffer.data, &mat->has_texture, sizeof(int));
-			memcpy(app->alphaCutoffBuffer.data, &mat->alpha_cutoff, sizeof(float));
-
-			VkDescriptorSet descriptorSet = app->descriptorSet;
-			if (mat->has_texture && mat->texture_index >= 0 && mat->texture_index < (int)app->texture_count)
-				descriptorSet = app->descriptorSets[mat->texture_index];
-
-			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
-		}
-		else
-		{
-			vec4 defaultColor = {1.0f, 1.0f, 1.0f, 1.0f};
-			int hasTexture = 0;
-			float defaultAlphaCutoff = 0.0f;
-			memcpy(app->baseColorBuffer.data, defaultColor, sizeof(vec4));
-			memcpy(app->hasTextureBuffer.data, &hasTexture, sizeof(int));
-			memcpy(app->alphaCutoffBuffer.data, &defaultAlphaCutoff, sizeof(float));
-			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout, 0, 1, &app->descriptorSet, 0, NULL);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelines[prim->material_index]);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout, 0, 1, &app->descriptorSets[prim->material_index], 0, NULL);
 		}
 
 		vkCmdDrawIndexed(commandBuffer, prim->index_count, 1, prim->first_index, 0, 0);
-	}
-
-	if (app->mesh.primitive_count == 0)
-	{
-		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout, 0, 1, &app->descriptorSet, 0, NULL);
-		vkCmdDrawIndexed(commandBuffer, app->mesh.index_count, 1, 0, 0, 0);
 	}
 
 	// Draw particles
@@ -1006,7 +1002,7 @@ void drawFrame(Application* app)
 		app->dirLight.color[2] = color.b;
 
 		nk_layout_row_dynamic(app->nkCtx, 25, 1);
-		nk_property_float(app->nkCtx, "Intensity", 0.0f, &app->dirLight.intensity, 20.0f, 0.5f, 0.1f);
+		
 	}
 	nk_end(app->nkCtx);
 
@@ -1193,7 +1189,7 @@ void recreateSwapchain(Application* app)
 	vkDeviceWaitIdle(app->device);
 
 	// Destroy pipeline before swapchain resources (like render pass)
-	vkDestroyPipeline(app->device, app->pipeline, NULL);
+	vkDestroyPipeline(app->device, app->pipelines[0], NULL);
 	cleanupSwapchain(app);
 	// Destroy Nuklear device before swapchain recreation (keeps nk_context alive)
 	nk_glfw3_device_destroy();
@@ -1201,7 +1197,7 @@ void recreateSwapchain(Application* app)
 	app->height = height;
 
 	createSwapchainRelatedResources(app);
-	app->pipeline = createMeshPipeline(app, app->vertShaderModule, app->fragShaderModule);
+	app->pipelines[0] = createMeshPipeline(app, app->vertShaderModule, app->fragShaderModule, &app->mesh.materials[0]);
 
 	// Recreate Nuklear device with new swapchain image views and framebuffer size
 	{
@@ -1268,7 +1264,7 @@ int main(void)
 	initWindow(&app);
 	initVulkan(&app);
 	mainLoop(&app);
-	cleanup(&app);
+	//cleanup(&app);
 	return 0;
 }
 

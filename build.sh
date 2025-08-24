@@ -61,8 +61,13 @@ done
 echo "Linking final binary..."
 gcc build/*.o -o build/tri $CFLAGS $LDFLAGS
 
-echo "Build complete. Running ./build/tri"
-./build/tri
+echo "Build complete."
+if [ "${SKIP_RUN:-0}" -ne 1 ]; then
+    echo "Running ./build/tri"
+    ./build/tri
+else
+    echo "SKIP_RUN=1 set; not launching the app."
+fi
 
 # gcc -ggdb lol2.c -o tri -D_DEBUG -DVK_USE_PLATFORM_XLIB_KHR -lvulkan -lglfw -lm && ./tri 
 # -save-temps is very useful for preprocessed code and insights 

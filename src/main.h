@@ -99,13 +99,29 @@ typedef struct StorageImage
 
 typedef struct Material
 {
-	vec4 base_color;    // Base color factor
-	int has_texture;    // Whether this material has a texture
-	int texture_index;  // Index into the textures array (-1 if no texture)
-	char* texture_path; // Path to texture file
-	float alpha_cutoff; // Alpha cutoff value for alpha testing
-	int alpha_mode;     // 0 = opaque, 1 = mask, 2 = blend
+    vec4 baseColorFactor;
+    float metallicFactor;
+    float roughnessFactor;
+    vec3 emissiveFactor;
+    int hasBaseColorTexture;
+    int hasMetallicRoughnessTexture;
+    int hasEmissiveTexture;
+    char* baseColorTexturePath;
+    char* metallicRoughnessTexturePath;
+    char* emissiveTexturePath;
+    float alphaCutoff;
+    int alphaMode;
+    bool doubleSided;
 } Material;
+
+// GPU-facing packed material data (std140-friendly via vec4-sized fields)
+typedef struct MaterialGPU
+{
+	vec4 baseColorFactor;     // rgba
+	vec4 emissiveFactor;      // rgb + pad
+	vec4 mr_ac_am;            // x: metallic, y: roughness, z: alphaCutoff, w: alphaMode (as float)
+	ivec4 hasFlags;           // x: hasBaseColor, y: hasMetallicRoughness, z: hasEmissive, w: unused
+} MaterialGPU;
 
 typedef struct Primitive
 {
@@ -118,22 +134,14 @@ typedef struct Primitive
 
 typedef struct PointLight
 {
-	vec3 position;
-	float _pad1; // Padding for alignment
-	vec3 color;
-	float intensity;
-	float constant; // Attenuation factors
-	float linear;
-	float quadratic;
-	float _pad2; // Padding for alignment
+	vec4 position;
+	vec4 color;
 } PointLight;
 
 typedef struct DirectionalLight
 {
-	vec3 direction;
-	float _pad1; // Padding
-	vec3 color;
-	float intensity;
+	vec4 direction;
+	vec4 color;
 } DirectionalLight;
 
 typedef struct UniformBufferObject
@@ -241,8 +249,8 @@ typedef struct Application
 	// Pipeline
 	//	VkRenderPass renderPass;
 	VkDescriptorSetLayout descriptorSetLayout;
+	VkPipeline* pipelines;
 	VkPipelineLayout pipelineLayout;
-	VkPipeline pipeline;
 	VkShaderModule vertShaderModule;
 	VkShaderModule fragShaderModule;
 
@@ -261,7 +269,9 @@ typedef struct Application
 	Buffer indexBuffer;
 
 	// Multiple textures support
-	Texture* textures;               // Array of textures
+	Texture* baseColorTextures;
+	Texture* metallicRoughnessTextures;
+	Texture* emissiveTextures;
 	u32 texture_count;               // Number of textures
 	VkDescriptorSet* descriptorSets; // One descriptor set per texture
 
@@ -274,6 +284,8 @@ typedef struct Application
 	VkDescriptorPool descriptorPool;
 	VkDescriptorSet descriptorSet;
 	VkPhysicalDeviceMemoryProperties memProperties;
+	// Per-material UBOs
+	Buffer* materialUniformBuffers; // one per material
 
 	// Lighting
 	PointLight lights[MAX_POINT_LIGHTS];
@@ -350,11 +362,15 @@ void cleanupSwapchain(Application* app);
 void recreateSwapchain(Application* app);
 
 // Textures and Samplers
-void createTextureImage(Application* app, const char* path, Texture* outTexture, u32* outMipLevels);
+void createDummyTexture(Application* app, Texture* outTexture, u32* outMipLevels);
+void createTextureImage(Application* app, const char* path, Texture* outTexture, u32* outMipLevels, VkFormat format);
 void generateMipmaps(Application* app, VkCommandBuffer cmd, VkImage image, VkFormat format, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
 void createTextureSampler(Application* app, Texture* texture, u32 mipLevels);
 void updateBaseColorAndHasTexture(Application* app);
 void createTextureResources(Application* app);
+
+// Skybox descriptors
+void createSkyboxDescriptors(Application* app);
 
 // Rendering and Command Buffers
 void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
@@ -368,7 +384,7 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 void recordComputeCommands(Application* app);
 void drawFrame(Application* app);
 void createPipeline(Application* app);
-VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader);
+VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader, Material* material);
 VkPipeline createParticlePipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader);
 VkPipeline createBrickPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader);
 VkPipeline createTerrainPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader);
@@ -382,7 +398,7 @@ void renderBloomPass(Application* app, VkCommandBuffer cmd);
 // Descriptors and Uniforms
 VkDescriptorSetLayout createDescriptorSetLayout(VkDevice device);
 VkDescriptorPool createDescriptorPool(VkDevice device);
-VkDescriptorSet allocateDescriptorSet(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout);
+VkDescriptorSet allocateDescriptorSet(VkDevice device, VkDescriptorPool pool, const VkDescriptorSetLayout* pLayout);
 void createDescriptors(Application* app);
 void createUniformBuffers(Application* app);
 // Models and GLTF
