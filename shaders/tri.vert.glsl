@@ -26,7 +26,7 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     vec3 cameraPos;
     uint numLights;
-    PointLight lights[4];
+    PointLight lights[8];
     DirectionalLight dirLight;
 } ubo;
 

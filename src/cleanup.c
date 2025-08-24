@@ -25,6 +25,17 @@ void cleanupResources(Application* app)
 	destroyBuffer(app->device, &app->particleBuffer);
 	destroyBuffer(app->device, &app->computeUniformBuffer);
 
+	// Per-material uniform buffers
+	if (app->materialUniformBuffers)
+	{
+		for (u32 i = 0; i < app->mesh.material_count; ++i)
+		{
+			destroyBuffer(app->device, &app->materialUniformBuffers[i]);
+		}
+		free(app->materialUniformBuffers);
+		app->materialUniformBuffers = NULL;
+	}
+
 	// Clean up multiple textures
 	if (app->baseColorTextures)
 	{
@@ -71,7 +82,19 @@ void cleanupResources(Application* app)
 	// Clean up mesh data
 	free(app->mesh.vertices);
 	free(app->mesh.indices);
-	
+
+	// Free material strings and array
+	if (app->mesh.materials)
+	{
+		for (u32 i = 0; i < app->mesh.material_count; ++i)
+		{
+			free(app->mesh.materials[i].baseColorTexturePath);
+			free(app->mesh.materials[i].metallicRoughnessTexturePath);
+			free(app->mesh.materials[i].emissiveTexturePath);
+		}
+		free(app->mesh.materials);
+		app->mesh.materials = NULL;
+	}
 
 	// Clean up primitives
 	free(app->mesh.primitives);

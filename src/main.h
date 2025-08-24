@@ -120,8 +120,14 @@ typedef struct MaterialGPU
 	vec4 baseColorFactor;     // rgba
 	vec4 emissiveFactor;      // rgb + pad
 	vec4 mr_ac_am;            // x: metallic, y: roughness, z: alphaCutoff, w: alphaMode (as float)
-	ivec4 hasFlags;           // x: hasBaseColor, y: hasMetallicRoughness, z: hasEmissive, w: unused
-} MaterialGPU;
+	int hasFlags[4];          // x: hasBaseColor, y: hasMetallicRoughness, z: hasEmissive, w: shadingMode (0=PBR,1=Toon)
+} MaterialGPU TYPE_ALIGN16;
+
+// Forward declare Application for prototypes below
+struct Application;
+// Materials system API (keep declarations here; implementations in .c files)
+void materials_build_gpu_ubos(struct Application* app);
+void materials_free_gpu_ubos(struct Application* app);
 
 typedef struct Primitive
 {
@@ -153,7 +159,17 @@ typedef struct UniformBufferObject
 	u32 numLights;
 	PointLight lights[MAX_POINT_LIGHTS];
 	DirectionalLight dirLight;
-} UniformBufferObject;
+	// Stylized rendering controls
+	int stylizedMode;            // 0=PBR, 1=Toon (global override)
+	float toonSteps;             // quantization steps
+	float toonSpecularStrength;  // specular band strength
+	float pad_ubo0;              // padding
+	// Advanced toon controls
+	float toonShadowSoftness;    // smoothstep width for bands (0..1)
+	float toonWrap;              // light wrap (0..1)
+	float rimStrength;           // rim light intensity (0..2)
+	float rimWidth;              // rim width exponent control (0..4)
+} UniformBufferObject TYPE_ALIGN16;
 
 typedef struct Mesh
 {
@@ -324,6 +340,16 @@ typedef struct Application
 	// Nuklear UI context
 	struct nk_context* nkCtx;
 	bool is_ui_mode;
+
+	// Stylized rendering settings (editable via UI)
+	int stylizedMode;            // 0=PBR, 1=Toon
+	float toonSteps;             // default 4
+	float toonSpecularStrength;  // default 0.1
+	float dirLightIntensity;     // multiply directional light color
+	float toonShadowSoftness;    // default 0.05
+	float toonWrap;              // default 0.2
+	float rimStrength;           // default 0.3
+	float rimWidth;              // default 1.5
 } Application;
 
 void createSkyboxTexture(Application* app);
@@ -371,6 +397,10 @@ void createTextureResources(Application* app);
 
 // Skybox descriptors
 void createSkyboxDescriptors(Application* app);
+
+// UI and materials helpers
+void drawUI(Application* app);
+void destroyMaterials(Application* app);
 
 // Rendering and Command Buffers
 void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,

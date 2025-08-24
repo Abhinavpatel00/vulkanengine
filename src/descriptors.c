@@ -27,12 +27,12 @@ VkDescriptorSetLayout createDescriptorSetLayout(VkDevice device)
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 	    },
-	    {
-	        .binding = 4,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-	        .descriptorCount = 1,
-	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-	    },
+		{
+			.binding = 4,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		},
 	};
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo = {
@@ -115,10 +115,11 @@ void createDescriptors(Application* app)
 		    .imageView = app->emissiveTextures[i].view,
 		    .sampler = app->emissiveTextures[i].sampler};
 
+		// MaterialGPU buffer already created in createTextureResources -> app->materialUniformBuffers[i]
 		VkDescriptorBufferInfo materialBufferInfo = {
-			.buffer = app->materialUniformBuffers[i].vkbuffer,
+		    .buffer = app->materialUniformBuffers[i].vkbuffer,
 		    .offset = 0,
-			.range = sizeof(MaterialGPU)};
+		    .range = sizeof(MaterialGPU)};
 
 		VkWriteDescriptorSet descriptorWrites[] = {
 		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = app->descriptorSets[i], .dstBinding = 0, .dstArrayElement = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .pBufferInfo = &bufferInfo},

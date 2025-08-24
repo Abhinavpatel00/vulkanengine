@@ -7,7 +7,7 @@ rm -rf ./build
 mkdir -p build compiledshaders
 
 # Compilation flags
-# CFLAGS="-Wpointer-arith -Wformat=2 -Wall -Wextra -Wshadow -ggdb -std=c99 -pedantic"
+CFLAGS="-Wpointer-arith -Wformat=2 -Wall -Wextra -Wshadow -ggdb -std=c11 -pedantic"
 CFLAGS="-D_DEBUG -DVK_USE_PLATFORM_WAYLAND_KHR"
 LDFLAGS="-lvulkan -lm -lglfw -lpthread -ldl"
 

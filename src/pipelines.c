@@ -4,6 +4,8 @@
 
 VkPipeline createMeshPipeline(Application* app, VkShaderModule vertShader, VkShaderModule fragShader, Material* material)
 {
+	// Hook: choose an alternate fragment shader for toon if needed later
+	// Currently we always use the same module; toon is handled in tri.frag via ubo.stylizedMode
 	VkPipelineShaderStageCreateInfo stages[2] = {
 	    {
 	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,

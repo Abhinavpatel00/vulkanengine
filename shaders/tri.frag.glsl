@@ -23,8 +23,17 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     vec3 cameraPos;
     uint numLights;
-    PointLight lights[4];
+    PointLight lights[8];
     DirectionalLight dirLight;
+    // Stylized controls (std140: pack as scalars)
+    int stylizedMode;            // 0=PBR, 1=Toon
+    float toonSteps;             // levels for diffuse
+    float toonSpecularStrength;  // specular band strength 0..1
+    float pad0;                  // padding
+    float toonShadowSoftness;    // smooth band width
+    float toonWrap;              // light wrap
+    float rimStrength;           // rim intensity
+    float rimWidth;              // rim width exponent
 } ubo;
 
 layout(binding = 1) uniform sampler2D baseColorSampler;
@@ -72,13 +81,17 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 void main() {
+    vec2 flippedUV = vec2(fragTexCoord.x, 1.0 - fragTexCoord.y); // 👈 Flip Y
+
     vec3 albedo;
     float metallic;
     float roughness;
     float alpha = 1.0;
 
     if (material.hasFlags.x == 1) {
-        vec4 bc = texture(baseColorSampler, fragTexCoord);
+        vec4 texColor = texture(baseColorSampler, flippedUV);
+        if (texColor.a < 0.1) discard; // early discard for alpha cutout
+        vec4 bc = texColor;
         albedo = bc.rgb * material.baseColorFactor.rgb;
         alpha = bc.a * material.baseColorFactor.a;
     } else {
@@ -87,7 +100,7 @@ void main() {
     }
 
     if (material.hasFlags.y == 1) {
-        vec4 metallicRoughness = texture(metallicRoughnessSampler, fragTexCoord);
+        vec4 metallicRoughness = texture(metallicRoughnessSampler, flippedUV);
         metallic = metallicRoughness.b * material.mr_ac_am.x;
         roughness = metallicRoughness.g * material.mr_ac_am.y;
     } else {
@@ -97,7 +110,7 @@ void main() {
 
     int alphaMode = int(material.mr_ac_am.w);
     float alphaCutoff = material.mr_ac_am.z;
-    if (alphaMode == 1 && alpha < alphaCutoff) discard; // mask
+    if (alphaMode == 1 && alpha < alphaCutoff) discard;
 
     vec3 N = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPos - fragWorldPos);
@@ -105,38 +118,63 @@ void main() {
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
 
-    vec3 Lo = vec3(0.0);
+    vec3 color = vec3(0.0);
+    vec3 ambient = vec3(0.03) * albedo;
 
-    // Directional light
+    // Directional light only for now
     vec3 L = normalize(-ubo.dirLight.direction.xyz);
     vec3 H = normalize(V + L);
-    float distance = 1.0; // Directional light is infinitely far
-    float attenuation = 1.0;
+    float NdotL = max(dot(N, L), 0.0);
     vec3 radiance = ubo.dirLight.color.rgb;
 
-    float NDF = distributionGGX(N, H, roughness);
-    float G = geometrySmith(N, V, L, roughness);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+    int mode = ubo.stylizedMode >= 0 ? ubo.stylizedMode : material.hasFlags.w;
+    if (mode == 1) {
+        // Light wrap to avoid harsh terminator
+        float wrapNdotL = clamp((NdotL + ubo.toonWrap) / (1.0 + ubo.toonWrap), 0.0, 1.0);
 
-    vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
-    kD *= 1.0 - metallic;
+        // Soft quantization using smoothstep between bands
+        float steps = max(1.0, ubo.toonSteps);
+        float t = wrapNdotL * steps;
+        float base = floor(t) / steps;
+        float frac = t - floor(t);
+        float softness = clamp(ubo.toonShadowSoftness, 0.0, 1.0);
+        float q = mix(base, base + 1.0 / steps, smoothstep(0.5 - softness, 0.5 + softness, frac));
+        vec3 diffuse = albedo * q;
 
-    float NdotL = max(dot(N, L), 0.0);
-    vec3 numerator = NDF * G * F;
-    float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
-    vec3 spec = numerator / denominator;
+        // Specular band with thresholding and control by roughness
+        float hdotn = max(dot(H, N), 0.0);
+        float specPow = mix(8.0, 128.0, 1.0 - clamp(roughness, 0.0, 1.0));
+        float specVal = pow(hdotn, specPow);
+        float specBand = smoothstep(0.6, 0.8, specVal) * ubo.toonSpecularStrength;
 
-    Lo += (kD * albedo / PI + spec) * radiance * NdotL;
+        // Rim lighting using 1 - N·V
+        float rim = 1.0 - max(dot(N, V), 0.0);
+        float rimMask = pow(clamp(rim, 0.0, 1.0), max(0.1, ubo.rimWidth));
+        vec3 rimColor = albedo * rimMask * ubo.rimStrength;
 
-    vec3 ambient = vec3(0.03) * albedo;
-    vec3 color = ambient + Lo;
+        color = ambient + (diffuse + specBand) * radiance + rimColor;
+    } else {
+        // PBR
+        float NDF = distributionGGX(N, H, roughness);
+        float G = geometrySmith(N, V, L, roughness);
+        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= 1.0 - metallic;
+        vec3 numerator = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * NdotL + 0.0001;
+        vec3 spec = numerator / denominator;
+        vec3 Lo = (kD * albedo / PI + spec) * radiance * NdotL;
+        color = ambient + Lo;
+    }
 
     if (material.hasFlags.z == 1) {
-        color += texture(emissiveSampler, fragTexCoord).rgb * material.emissiveFactor.rgb;
+        color += texture(emissiveSampler, flippedUV).rgb * material.emissiveFactor.rgb;
     } else {
         color += material.emissiveFactor.rgb;
     }
 
-    outColor = vec4(color, alpha);
+    // Apply gamma correction for display
+    vec3 gammaColor = pow(clamp(color, 0.0, 1.0), vec3(1.0/2.2));
+    outColor = vec4(gammaColor, alpha);
 }

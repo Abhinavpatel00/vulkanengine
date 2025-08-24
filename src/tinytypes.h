@@ -3,9 +3,13 @@
 #ifndef TINYTYPES_H
 #define TINYTYPES_H
 
+// Basic headers
 #include <stdint.h>
 #include <stddef.h>  // for size_t
 #include <stdbool.h> // for bool
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  include <stdalign.h> // alignas/_Alignas when available
+#endif
 
 #include "../external/volk/volk.h"
 
@@ -42,15 +46,45 @@
 #define DBG(fmt, ...)
 #endif
 
-#if COMPILER_MSVC
-# define AlignOf(T) __alignof(T)
-#elif COMPILER_CLANG
-# define AlignOf(T) __alignof(T)
-#elif COMPILER_GCC
-# define AlignOf(T) __alignof__(T)
-#else
-// errror not defined 
+// Compiler detection (define COMPILER_* if not provided)
+#if !defined(COMPILER_MSVC) && !defined(COMPILER_CLANG) && !defined(COMPILER_GCC)
+#  if defined(_MSC_VER)
+#    define COMPILER_MSVC 1
+#  elif defined(__clang__)
+#    define COMPILER_CLANG 1
+#  elif defined(__GNUC__)
+#    define COMPILER_GCC 1
+#  endif
 #endif
+
+// Portable AlignOf
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  define AlignOf(T) _Alignof(T)
+#elif defined(COMPILER_MSVC)
+#  define AlignOf(T) __alignof(T)
+#elif defined(COMPILER_CLANG) || defined(COMPILER_GCC)
+#  define AlignOf(T) __alignof__(T)
+#else
+#  define AlignOf(T) sizeof(T)
+#endif
+
+// Alignment specifiers
+#if defined(__GNUC__) || defined(__clang__)
+#  define ALIGNAS(N) __attribute__((aligned(N)))
+#  define TYPE_ALIGNAS(N) __attribute__((aligned(N)))
+#elif defined(_MSC_VER)
+#  define ALIGNAS(N) __declspec(align(N))
+#  define TYPE_ALIGNAS(N) __declspec(align(N))
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  define ALIGNAS(N) _Alignas(N)
+#  define TYPE_ALIGNAS(N) /* may not apply to typedef on some compilers */
+#else
+#  define ALIGNAS(N)
+#  define TYPE_ALIGNAS(N)
+#endif
+
+#define ALIGN16 ALIGNAS(16)
+#define TYPE_ALIGN16 TYPE_ALIGNAS(16)
 
 #define MEMBER_OFFSET(Type, Member) (offsetof(Type, Member))
 #define POINTER_FROM_MEMBER_OFFSET(MemberType, BasePtr, Offset) \

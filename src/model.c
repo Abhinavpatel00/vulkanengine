@@ -1,8 +1,9 @@
 #include "main.h"
-
-#include "main.h"
 void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 parentTransform, Application* app, uint32_t* vertexOffset, uint32_t* indexOffset, uint32_t* primitiveIndex)
 {
+	(void)app; // unused for now
+
+	// Compute world transform for this node
 	mat4 localTransform;
 	glm_mat4_identity(localTransform);
 	cgltf_node_transform_local(node, (cgltf_float*)localTransform);
@@ -15,26 +16,23 @@ void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 par
 		for (cgltf_size i = 0; i < node->mesh->primitives_count; ++i)
 		{
 			cgltf_primitive* primitive = &node->mesh->primitives[i];
-			uint32_t startVertex = *vertexOffset;
-			uint32_t startIndex = *indexOffset;
-			cgltf_accessor* posAccessor = NULL;
 
-			// Find material index
+			// Determine material index for this primitive
 			int materialIndex = -1;
+			vec4 baseColor = {1.0f, 1.0f, 1.0f, 1.0f};
 			if (primitive->material)
 			{
 				materialIndex = (int)(primitive->material - data->materials);
+				if (materialIndex >= 0 && (u32)materialIndex < outMesh->material_count)
+				{
+					memcpy(baseColor, outMesh->materials[materialIndex].baseColorFactor, sizeof(vec4));
+				}
 			}
 
-			// Get base color from material
-			vec4 baseColor = {1.0f, 1.0f, 1.0f, 1.0f}; // default white
-			if (materialIndex >= 0 && materialIndex < (int)outMesh->material_count)
-			{
-				memcpy(baseColor, outMesh->materials[materialIndex].baseColorFactor, sizeof(vec4));
-			}
-
-			// Locate attribute accessors robustly
-			cgltf_accessor *normalAccessor = NULL, *uvAccessor = NULL;
+			// Find attribute accessors
+			cgltf_accessor* posAccessor = NULL;
+			cgltf_accessor* normalAccessor = NULL;
+			cgltf_accessor* uvAccessor = NULL;
 			for (cgltf_size a = 0; a < primitive->attributes_count; ++a)
 			{
 				const cgltf_attribute* attr = &primitive->attributes[a];
@@ -47,15 +45,18 @@ void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 par
 			}
 
 			if (!posAccessor)
-				continue;
+				continue; // cannot build vertices
 
-			// Precompute normal matrix from worldTransform
+			// Precompute normal matrix from world transform
 			mat3 normalMatrix;
 			glm_mat4_pick3(worldTransform, normalMatrix);
 			glm_mat3_inv(normalMatrix, normalMatrix);
 			glm_mat3_transpose(normalMatrix);
 
-			// Extract vertices using cgltf API (handles strides/offsets)
+			const uint32_t startVertex = *vertexOffset;
+			const uint32_t startIndex = *indexOffset;
+
+			// Emit vertices
 			for (cgltf_size v = 0; v < posAccessor->count; ++v)
 			{
 				Vertex vert = (Vertex){0};
@@ -79,10 +80,10 @@ void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 par
 				}
 				else
 				{
-					glm_vec3_copy((vec3){0, 1, 0}, vert.normal);
+					glm_vec3_copy((vec3){0.0f, 1.0f, 0.0f}, vert.normal);
 				}
 
-				// Texcoord 0 (flip V)
+				// Texcoord 0 (flip V for Vulkan)
 				if (uvAccessor)
 				{
 					float uv[2] = {0};
@@ -91,32 +92,33 @@ void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 par
 					vert.texcoord[1] = 1.0f - uv[1];
 				}
 
-				// Set vertex color from material
+				// Vertex color from material base color
 				memcpy(vert.color, baseColor, sizeof(vec4));
 
 				outMesh->vertices[(*vertexOffset)++] = vert;
 			}
 
-			// Add indices and create primitive entry
+			// Indices
 			uint32_t indexCount = 0;
 			if (primitive->indices)
 			{
-				indexCount = primitive->indices->count;
+				indexCount = (uint32_t)primitive->indices->count;
 				for (cgltf_size k = 0; k < primitive->indices->count; ++k)
 				{
-					outMesh->indices[(*indexOffset)++] = startVertex + cgltf_accessor_read_index(primitive->indices, k);
+					uint32_t idx = (uint32_t)cgltf_accessor_read_index(primitive->indices, k);
+					outMesh->indices[(*indexOffset)++] = startVertex + idx;
 				}
 			}
 			else
 			{
-				indexCount = posAccessor->count;
+				indexCount = (uint32_t)posAccessor->count;
 				for (cgltf_size k = 0; k < posAccessor->count; ++k)
 				{
-					outMesh->indices[(*indexOffset)++] = startVertex + k;
+					outMesh->indices[(*indexOffset)++] = startVertex + (uint32_t)k;
 				}
 			}
 
-			// Create primitive entry
+			// Record primitive
 			if (*primitiveIndex < outMesh->primitive_count)
 			{
 				outMesh->primitives[*primitiveIndex].first_index = startIndex;
@@ -127,7 +129,7 @@ void ProcessGltfNode(cgltf_node* node, Mesh* outMesh, cgltf_data* data, mat4 par
 		}
 	}
 
-	// Recurse through children
+	// Recurse into children
 	for (cgltf_size i = 0; i < node->children_count; ++i)
 	{
 		ProcessGltfNode(node->children[i], outMesh, data, worldTransform, app, vertexOffset, indexOffset, primitiveIndex);

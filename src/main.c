@@ -124,7 +124,7 @@ void createSwapchainRelatedResources(Application* app)
 void createModelAndBuffers(Application* app)
 {
 	// === Load model ===
-	// loadGltfModel("/home/lka/myprojects/vulkantest3/sponza/Sponza.gltf", &app->mesh);
+//	 loadGltfModel("/home/lka/myprojects/vulkantest3/sponza/Sponza.gltf", &app->mesh);
 	//
 	//
 	loadGltfModel("data/shibahu/scene.gltf", &app->mesh);
@@ -253,6 +253,7 @@ void createTextureResources(Application* app)
 	m.hasFlags[0] = app->mesh.materials[i].hasBaseColorTexture;
 	m.hasFlags[1] = app->mesh.materials[i].hasMetallicRoughnessTexture;
 	m.hasFlags[2] = app->mesh.materials[i].hasEmissiveTexture;
+	m.hasFlags[3] = 0; // reserved for per-material shading mode override (0=PBR by default)
 
 	createBuffer(app, &app->materialUniformBuffers[i], sizeof(MaterialGPU), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 	memcpy(app->materialUniformBuffers[i].data, &m, sizeof(MaterialGPU));
@@ -502,6 +503,16 @@ void initVulkan(Application* app)
 	app->fpsLastTime = glfwGetTime();
 	app->fpsFrameCount = 0;
 	app->fps = 0.0f;
+
+	// Stylized defaults
+	app->stylizedMode = 0; // PBR
+	app->toonSteps = 4.0f;
+	app->toonSpecularStrength = 0.1f;
+	app->dirLightIntensity = 10.0f;
+	app->toonShadowSoftness = 0.05f;
+	app->toonWrap = 0.2f;
+	app->rimStrength = 0.3f;
+	app->rimWidth = 1.5f;
 
 	createResources(app);
 	createPipeline(app);
@@ -826,6 +837,16 @@ void recordCommandBuffer(Application* app, VkCommandBuffer commandBuffer, u32 im
 	for (u32 i = 0; i < app->numActiveLights; i++)
 		ubo.lights[i] = app->lights[i];
 	ubo.dirLight = app->dirLight;
+	// Apply per-frame directional intensity without mutating app->dirLight
+	for (int c = 0; c < 3; ++c) ubo.dirLight.color[c] *= app->dirLightIntensity;
+	ubo.stylizedMode = app->stylizedMode;
+	ubo.toonSteps = app->toonSteps;
+	ubo.toonSpecularStrength = app->toonSpecularStrength;
+	ubo.pad_ubo0 = 0.0f;
+	ubo.toonShadowSoftness = app->toonShadowSoftness;
+	ubo.toonWrap = app->toonWrap;
+	ubo.rimStrength = app->rimStrength;
+	ubo.rimWidth = app->rimWidth;
 	memcpy(app->uniformBuffer.data, &ubo, sizeof(ubo));
 
 	// Update skybox uniform buffer (vertex shader removes translation)
@@ -945,11 +966,7 @@ void drawFrame(Application* app)
 
 	VK_CHECK(vkResetFences(app->device, 1, &app->inFlightFences[app->currentFrame]));
 
-	VkCommandBuffer commandBuffer = app->commandBuffers[app->currentFrame];
-	VK_CHECK(vkResetCommandBuffer(commandBuffer, 0));
-	recordCommandBuffer(app, commandBuffer, imageIndex);
-
-	// Build Nuklear UI
+	// Build Nuklear UI first (updates settings used in this frame)
 	nk_glfw3_new_frame();
 
 	// FPS Widget
@@ -1005,6 +1022,30 @@ void drawFrame(Application* app)
 		
 	}
 	nk_end(app->nkCtx);
+
+	// UI: stylized controls and directional light intensity
+	if (nk_begin(app->nkCtx, "Shading", nk_rect(240, 10, 280, 250),
+			NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_TITLE))
+	{
+		nk_layout_row_dynamic(app->nkCtx, 25, 1);
+		if (nk_option_label(app->nkCtx, "PBR", app->stylizedMode == 0)) app->stylizedMode = 0;
+		if (nk_option_label(app->nkCtx, "Toon", app->stylizedMode == 1)) app->stylizedMode = 1;
+
+		nk_layout_row_dynamic(app->nkCtx, 25, 1);
+		nk_property_float(app->nkCtx, "Toon Steps", 1.0f, &app->toonSteps, 16.0f, 1.0f, 1.0f);
+		nk_property_float(app->nkCtx, "Spec Strength", 0.0f, &app->toonSpecularStrength, 1.0f, 0.01f, 0.005f);
+		nk_property_float(app->nkCtx, "Dir Intensity", 0.0f, &app->dirLightIntensity, 8.0f, 0.1f, 0.01f);
+		nk_property_float(app->nkCtx, "Shadow Soft", 0.0f, &app->toonShadowSoftness, 1.0f, 0.01f, 0.005f);
+		nk_property_float(app->nkCtx, "Light Wrap", 0.0f, &app->toonWrap, 1.0f, 0.01f, 0.005f);
+		nk_property_float(app->nkCtx, "Rim Strength", 0.0f, &app->rimStrength, 2.0f, 0.01f, 0.005f);
+		nk_property_float(app->nkCtx, "Rim Width", 0.1f, &app->rimWidth, 4.0f, 0.1f, 0.01f);
+	}
+	nk_end(app->nkCtx);
+
+	// Record commands after UI so UBO uses updated settings
+	VkCommandBuffer commandBuffer = app->commandBuffers[app->currentFrame];
+	VK_CHECK(vkResetCommandBuffer(commandBuffer, 0));
+	recordCommandBuffer(app, commandBuffer, imageIndex);
 
 	// Submit the main command buffer first; signal per-image sceneDone semaphore
 	VkSubmitInfo submitInfo = {
